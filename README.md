@@ -1,89 +1,103 @@
 # Local Live Snippets
 
-Chrome extension (Manifest V3) that periodically screenshots **zones of web pages** — dashboards, feeds, anything behind a login — and shows them, always fresh, on your **New Tab page**. A local clone of Arc's "Live Previews".
+> Turn your Chrome New Tab into an ambient, glanceable dashboard. Clip auto-updating visual widgets from any web page — dashboards, analytics, feeds, or internal tools behind login. 100% local, private, and session-aware.
 
-- 100 % local: no server, no telemetry, no npm, no build step.
-- Captures run in a real tab of your Chrome profile, so your existing sessions/cookies are reused.
-- UI is in French.
+A private, local reimagining of Arc's **Live Previews** for Google Chrome (Manifest V3).
 
-![New Tab with two live snippets](docs/screenshot.png)
+- **100% Local & Private**: No cloud, no remote server, no analytics, no telemetry.
+- **Session-Aware**: Captures run inside your Chrome profile, preserving your existing sessions and cookies.
+- **Magnetic Freeform Board**: Free-placement canvas with edge snapping, homothetic card resizing, hover-revealed actions, and a refined dark frosted glass aesthetic.
+- **Zero Build Step**: Pure vanilla JavaScript, modern CSS and HTML. No npm, no framework overhead.
+
+![New Tab with live snippets](docs/screenshot.png)
 
 ## Install
 
-1. Clone or download this repo.
-2. Open `chrome://extensions`.
-3. Turn on **Developer mode** (top-right toggle).
-4. Click **Load unpacked** and select the `local-live-snippets` folder.
-5. Open a new tab: the extension replaces the New Tab page.
+1. Clone or download this repository.
+2. Navigate to `chrome://extensions`.
+3. Enable **Developer mode** (top-right toggle).
+4. Click **Load unpacked** and select the `local-live-snippets` directory.
+5. Open a new tab to see your live board.
 
 ## Use
 
-1. Go to the page you want to watch (log in first if needed).
+1. Go to any page you want to monitor (log in first if needed).
 2. Click the extension icon → **Capture a zone of this page**.
-3. Drag a rectangle over the zone. Adjust it with the handles, then press **Enter** (Esc cancels).
+3. Drag a rectangle over the target area, fine-tune using the corner/edge handles, then press **Enter** (Esc to cancel).
 
-A snippet is created, captured immediately, and a new tab opens with your board.
+A snippet is created, captured immediately, and opens right on your New Tab board.
 
-On the New Tab page:
+On your New Tab page:
 
-- Drag a card anywhere; resize it from the bottom-right corner. Cards keep the aspect ratio of the capture and snap to each other's edges. Layout is saved and scales with the window width.
-- Controls appear on hover: **↻** recaptures now, **⋯** opens the menu (open page, redefine zone, rename, interval, pause, delete). The pill on the top right shows the source site and opens it.
-- Click the image to open the source page.
+- **Move & Scale**: Drag cards anywhere; resize from the bottom-right handle. Cards retain the exact aspect ratio of the capture and softly snap to adjacent edges.
+- **Hover Controls**: Actions stay invisible until hover — **↻** to refresh immediately, **⋯** for menu options (open site, redefine crop area, rename, change interval, pause, delete).
+- **Source Pill**: The discreet top-right pill indicates the origin domain and opens the live page on click.
+- **Card Click**: Clicking the capture navigates directly to the target URL.
 
-Default refresh interval is 15 minutes (per snippet, editable from the card menu or in **Settings**).
+The default refresh interval is 15 minutes (customizable per snippet or globally in **Settings**).
 
 ## About the "debugging this browser" bar
 
-Every capture shows this bar for a few seconds:
+Every capture briefly surfaces this indicator for a few seconds:
 
 > *Une extension a commencé à déboguer ce navigateur* / *"Local Live Snippets" started debugging this browser*
 
-This is expected. The extension uses `chrome.debugger` (Chrome DevTools Protocol) because it is the only API that can screenshot a **background** tab with a precise clip and a forced viewport. Nothing is sent anywhere. The bar disappears when the capture ends.
+This is standard Chrome behavior. The extension utilizes `chrome.debugger` (Chrome DevTools Protocol) because it is the only native browser API capable of capturing an accurate, non-visible background tab with custom clips and viewport emulation. Nothing leaves your machine. The notification dismisses automatically once capture completes.
 
-If you click **Cancel** on that bar, the current capture is aborted cleanly and the queue continues.
+Clicking **Cancel** on the bar simply halts the active capture gracefully.
 
-To hide the bar permanently, launch Chrome with:
+To permanently silence this bar, start Chrome with:
 
-```
+```bash
 --silent-debugger-extension-api
 ```
 
-(macOS: `open -a "Google Chrome" --args --silent-debugger-extension-api`). This flag only silences the warning UI; it does not change what the extension can do.
+*(On macOS: `open -a "Google Chrome" --args --silent-debugger-extension-api`)*. This flag only suppresses the banner UI without altering extension permissions.
 
 ## Black or empty captures
 
-If a snippet comes out black or with grey placeholders (X/Twitter, lazy-loaded galleries…), the page refused to render in a background tab. The extension already fakes visibility and pre-scrolls to trigger lazy loading; if that is not enough:
+If a snippet yields a blank or partial capture (e.g. X/Twitter, dynamic single-page apps, lazy-loaded charts), the target site may delay painting while backgrounded. Built-in mitigations include visibility emulation and pre-scrolling. If issues persist:
 
-1. **Settings → Use a dedicated capture window**. Captures then run in a small unfocused popup window whose tab is really "visible" to Chrome. It appears briefly behind your current window and closes when the queue is empty.
-2. Per snippet: raise **Délai après chargement**, or set **Attendre ce sélecteur** to an element that only exists once the data is loaded.
-3. On infinite feeds, uncheck **Pré-scroller la page** for that snippet.
+1. **Settings → Use a dedicated capture window**: Renders through a transient, unfocused mini-window treated as fully active by Chrome. It closes automatically once the queue finishes.
+2. **Fine-tune timing**: Increase **Delay after load (ms)**, or specify **Wait for selector before capture** with a CSS selector matching a rendered element.
+3. **Infinite feeds**: Uncheck **Pre-scroll the page to load lazy images** if automatic scrolling triggers unwanted pagination.
 
-Hover the status in Settings or the popup to see a short diagnostic of the last capture.
+Hover over any status pill in Settings or the extension popup to view precise execution diagnostics.
 
 ## How it works
 
-For each snippet, one at a time: open a pinned muted tab (or the dedicated window) → attach `chrome.debugger` → emulate a fixed viewport (the one you had when drawing the zone) → navigate → wait for load / selector / delay → detect login redirects (keeps the last good image if the session expired) → prime lazy content → measure the anchor element + offset → `Page.captureScreenshot` (WebP) → detach and close the tab, always in a `finally`.
+For each snippet in the queue:
+1. Spawns an isolated capture tab (or dedicated popup window).
+2. Attaches `chrome.debugger` (CDP 1.3).
+3. Overrides device metrics to mirror the original capture viewport.
+4. Emulates foreground visibility (`document.visibilityState`, focus, requestAnimationFrame).
+5. Navigates to target URL and awaits `loadEventFired` + custom selector / settling delay.
+6. Detects session expiration or login redirects (preserving the previous clean snapshot).
+7. Eagerly primes lazy images and font readiness.
+8. Measures anchor coordinates and issues `Page.captureScreenshot` (WebP format).
+9. Verifies frame entropy (auto-retrying if a blank frame is detected).
+10. Detaches debugger and tears down the capture tab in a guaranteed `finally` block.
 
-Images live in IndexedDB, config in `chrome.storage.local`, the capture queue in `chrome.storage.session` so it survives service-worker restarts.
+Snapshots reside in **IndexedDB**, configurations in `chrome.storage.local`, and queue state in `chrome.storage.session` for resilience across service worker cycles.
 
 ## Limits
 
-- A pinned tab (or the popup window) flashes briefly during each capture.
-- Sessions requiring 2FA must be re-authenticated by hand; the extension keeps the last image and shows a reconnect button.
-- Captures are stored unencrypted in your Chrome profile.
-- `chrome://` pages, the Web Store and PDFs cannot be captured.
+- Captures require a brief background tab or popup window lifecycle.
+- Pages requiring multi-factor authentication (2FA) must be re-authenticated manually when sessions expire; previous captures remain displayed with an alert badge.
+- Internal `chrome://` URLs, Chrome Web Store items, and native PDF viewer pages cannot be scripted by extensions.
 
-## Files
+## Architecture
 
 ```
-manifest.json   MV3 manifest
-background.js   service worker: alarm, persisted queue, picker results
-capture.js      CDP capture pipeline
-picker.js       injected drag-to-select overlay
-newtab.*        New Tab page (free board: drag, homothetic resize, snapping)
-options.*       settings, snippet editor, import/export
-popup.*         toolbar popup
-storage.js      config helpers    db.js  IndexedDB helpers
+manifest.json   MV3 declaration & permissions
+background.js   Service worker: alarm orchestration, queue, message dispatch
+capture.js      CDP pipeline: visibility spoofing, lazy priming, clip measurement
+picker.js       Interactive selection overlay with 8-point handles & DOM anchor detection
+newtab.*        Ambient New Tab board: free canvas, edge snapping, dark glass styling
+options.*       Settings interface, snippet editor & JSON configuration backup
+popup.*         Extension action popup: quick status & capture triggers
+storage.js      Persistence schema & geometry math
+db.js           IndexedDB blob storage for WebP captures
 ```
 
-MIT license.
+MIT License.

@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Local Live Snippets",
   "version": "0.3.0",
-  "description": "Periodic captures of web page zones (dashboards, feeds) shown on your New Tab page. 100% local, reuses your sessions.",
+  "description": "Turn your New Tab into an ambient live dashboard with auto-updating visual clips from any web page. 100% local, session-aware.",
   "permissions": [
     "alarms",
     "storage",
