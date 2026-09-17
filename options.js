@@ -32,21 +32,21 @@ let meta = {};
 /* ------------------------------ liste ------------------------------ */
 
 const STATUS_LABELS = {
-  ok: "À jour",
-  capturing: "Capture en cours…",
-  session_expired: "Session expirée",
-  selector_not_found: "Sélecteur introuvable",
-  error: "Erreur",
+  ok: "Up to date",
+  capturing: "Capturing…",
+  session_expired: "Session expired",
+  selector_not_found: "Selector not found",
+  error: "Error",
 };
 
 function relativeTime(timestamp) {
-  if (!timestamp) return "jamais capturé";
+  if (!timestamp) return "never captured";
   const minutes = Math.round((Date.now() - timestamp) / 60000);
-  if (minutes < 1) return "à l'instant";
-  if (minutes < 60) return `il y a ${minutes} min`;
+  if (minutes < 1) return "just now";
+  if (minutes < 60) return `${minutes} min ago`;
   const hours = Math.round(minutes / 60);
-  if (hours < 24) return `il y a ${hours} h`;
-  return `il y a ${Math.round(hours / 24)} j`;
+  if (hours < 24) return `${hours} h ago`;
+  return `${Math.round(hours / 24)} d ago`;
 }
 
 function stalenessClass(snippet, entry) {
@@ -92,7 +92,7 @@ function renderList() {
     main.appendChild(el("div", "snippet-url", snippet.url));
 
     const status = (entry && entry.status) || "never";
-    const label = STATUS_LABELS[status] || "Jamais capturé";
+    const label = STATUS_LABELS[status] || "Never captured";
     const isBad = status !== "ok" && status !== "capturing";
     const statusLine = el("div", `snippet-status${isBad ? " bad" : ""}`);
     statusLine.textContent = `${label} — ${relativeTime((entry && entry.capturedAt) || 0)}`;
@@ -105,20 +105,20 @@ function renderList() {
 
     li.appendChild(main);
     li.appendChild(
-      makeBtn(snippet.enabled ? "Désactiver" : "Activer", "btn", async () => {
+      makeBtn(snippet.enabled ? "Pause" : "Resume", "btn", async () => {
         await upsertSnippet({ ...snippet, enabled: !snippet.enabled });
         await load();
       })
     );
     li.appendChild(
-      makeBtn("Capturer", "btn", async () => {
+      makeBtn("Capture", "btn", async () => {
         await chrome.runtime.sendMessage({ type: "captureNow", snippetId: snippet.id });
       })
     );
-    li.appendChild(makeBtn("Éditer", "btn", () => openForm(snippet)));
+    li.appendChild(makeBtn("Edit", "btn", () => openForm(snippet)));
     li.appendChild(
-      makeBtn("Supprimer", "btn btn-danger", async () => {
-        if (!confirm(`Supprimer « ${snippet.name} » ?`)) return;
+      makeBtn("Delete", "btn btn-danger", async () => {
+        if (!confirm(`Delete “${snippet.name}”?`)) return;
         await deleteSnippet(snippet.id);
         // Sinon le blob resterait orphelin dans IndexedDB.
         await deleteImage(snippet.id).catch(() => {});
@@ -151,7 +151,7 @@ for (const radio of form.querySelectorAll('input[name="mode"]')) {
 
 function openForm(snippet) {
   const s = snippet ? normalizeSnippet(snippet) : normalizeSnippet({ ...DEFAULT_SNIPPET, mode: "anchor" });
-  formTitle.textContent = snippet ? `Éditer « ${s.name} »` : "Nouveau snippet";
+  formTitle.textContent = snippet ? `Edit “${s.name}”` : "New snippet";
   $("f-id").value = snippet ? s.id : "";
   $("f-name").value = snippet ? s.name : "";
   $("f-url").value = snippet ? s.url : "";
@@ -170,8 +170,8 @@ function openForm(snippet) {
   $("f-enabled").checked = s.enabled;
   $("f-anchor").value = s.anchorSelector;
   $("anchor-offset").textContent = s.anchorSelector
-    ? `Décalage : ${s.offset.dx}, ${s.offset.dy} — taille ${s.offset.width}×${s.offset.height} px.`
-    : "Aucune zone dessinée pour l'instant.";
+    ? `Offset: ${s.offset.dx}, ${s.offset.dy} — size ${s.offset.width}×${s.offset.height} px.`
+    : "No zone drawn yet.";
 
   const radio = form.querySelector(`input[name="mode"][value="${s.mode}"]`);
   if (radio) radio.checked = true;
@@ -180,7 +180,7 @@ function openForm(snippet) {
   formError.hidden = true;
   formError.textContent = "";
   pickHint.textContent =
-    "Ouvre l'URL dans un onglet : dessinez un rectangle, Entrée valide, Échap annule.";
+    "Opens the URL in a tab: draw a rectangle, Enter confirms, Esc cancels.";
   formPanel.hidden = false;
   formPanel.scrollIntoView({ behavior: "smooth", block: "start" });
   $("f-name").focus();
@@ -200,10 +200,10 @@ function showFormError(message) {
 function readForm() {
   const mode = currentMode();
   const url = $("f-url").value.trim();
-  if (!/^https?:\/\/\S+/i.test(url)) throw new Error("L'URL doit commencer par http:// ou https://");
+  if (!/^https?:\/\/\S+/i.test(url)) throw new Error("The URL must start with http:// or https://");
 
   const selector = $("f-selector").value.trim();
-  if (mode === "selector" && !selector) throw new Error("Un sélecteur CSS est requis en mode « Sélecteur ».");
+  if (mode === "selector" && !selector) throw new Error("A CSS selector is required in “CSS selector” mode.");
 
   const rect = {
     x: Number($("f-rect-x").value),
@@ -213,15 +213,15 @@ function readForm() {
   };
   if (mode === "rect") {
     for (const [key, value] of Object.entries(rect)) {
-      if (!Number.isFinite(value)) throw new Error(`Rectangle : « ${key} » doit être un nombre.`);
+      if (!Number.isFinite(value)) throw new Error(`Rectangle: “${key}” must be a number.`);
     }
-    if (rect.width < 1 || rect.height < 1) throw new Error("Rectangle : largeur et hauteur doivent être ≥ 1.");
+    if (rect.width < 1 || rect.height < 1) throw new Error("Rectangle: width and height must be ≥ 1.");
   }
 
   const id = $("f-id").value;
   const previous = id ? snippets.find((s) => s.id === id) || {} : {};
   if (mode === "anchor" && !$("f-anchor").value.trim()) {
-    throw new Error("Dessinez d'abord une zone avec « Redéfinir la zone ».");
+    throw new Error("Draw a zone first with “Redefine zone”.");
   }
 
   return normalizeSnippet({
@@ -269,28 +269,28 @@ $("capture-all").addEventListener("click", async () => {
 $("pick-zone").addEventListener("click", async () => {
   const url = $("f-url").value.trim();
   if (!/^https?:\/\/\S+/i.test(url)) {
-    showFormError("Renseignez d'abord une URL http(s) valide.");
+    showFormError("Enter a valid http(s) URL first.");
     return;
   }
   const id = $("f-id").value;
   if (!id) {
-    showFormError("Enregistrez d'abord le snippet, puis redéfinissez sa zone.");
+    showFormError("Save the snippet first, then redefine its zone.");
     return;
   }
   formError.hidden = true;
-  pickHint.textContent = "Ouverture de la page…";
+  pickHint.textContent = "Opening the page…";
 
   try {
     const res = await chrome.runtime.sendMessage({ type: "startPicker", url, snippetId: id });
-    if (res && res.ok === false) throw new Error(res.error || "Échec de l'ouverture du sélecteur.");
-    pickHint.textContent = "Dessinez le rectangle dans l'onglet ouvert (Échap pour annuler).";
+    if (res && res.ok === false) throw new Error(res.error || "Could not open the picker.");
+    pickHint.textContent = "Draw the rectangle in the tab that opened (Esc to cancel).";
   } catch (error) {
     const message = error && error.message ? error.message : String(error);
     pickHint.textContent =
-      "Ouvre l'URL dans un onglet : dessinez un rectangle, Entrée valide, Échap annule.";
+      "Opens the URL in a tab: draw a rectangle, Enter confirms, Esc cancels.";
     showFormError(
-      `Impossible d'injecter le sélecteur : ${message}. ` +
-        "Les pages chrome://, le Chrome Web Store et les PDF sont hors de portée des extensions."
+      `Could not inject the picker: ${message}. ` +
+        "chrome:// pages, the Chrome Web Store and PDFs are out of reach for extensions."
     );
   }
 });
@@ -332,7 +332,7 @@ function showMaintenance(message) {
 }
 
 $("clear-images").addEventListener("click", async () => {
-  if (!confirm("Supprimer toutes les images capturées ? La configuration est conservée.")) return;
+  if (!confirm("Delete all captured images? Your configuration is kept.")) return;
   await clearImages();
   const nextMeta = {};
   for (const [id, entry] of Object.entries(meta)) {
@@ -340,7 +340,7 @@ $("clear-images").addEventListener("click", async () => {
   }
   await chrome.storage.local.set({ [KEY_META]: nextMeta });
   await load();
-  showMaintenance("Images supprimées.");
+  showMaintenance("Images deleted.");
 });
 
 $("export-config").addEventListener("click", async () => {
@@ -353,7 +353,7 @@ $("export-config").addEventListener("click", async () => {
   a.download = `local-live-snippets-${new Date().toISOString().slice(0, 10)}.json`;
   a.click();
   setTimeout(() => URL.revokeObjectURL(url), 5000);
-  showMaintenance("Configuration exportée (sans les images).");
+  showMaintenance("Configuration exported (images not included).");
 });
 
 $("import-config").addEventListener("click", () => $("import-file").click());
@@ -365,9 +365,9 @@ $("import-file").addEventListener("change", async (event) => {
   try {
     const payload = JSON.parse(await file.text());
     if (!payload || !Array.isArray(payload.snippets)) {
-      throw new Error("Fichier invalide : champ « snippets » absent.");
+      throw new Error("Invalid file: missing “snippets” field.");
     }
-    if (!confirm(`Remplacer la configuration actuelle par ${payload.snippets.length} snippet(s) ?`)) return;
+    if (!confirm(`Replace the current configuration with ${payload.snippets.length} snippet(s)?`)) return;
     // Les exports v1 (displayWidth, gridColumns, sans layout) restent lisibles :
     // les champs disparus sont ignorés et la grille replace les cartes.
     const legacy = Number(payload.version) < 2;
@@ -377,11 +377,11 @@ $("import-file").addEventListener("change", async (event) => {
     await loadSettingsForm();
     showMaintenance(
       legacy
-        ? `${payload.snippets.length} snippet(s) importé(s) depuis un export v1 : les cartes seront replacées automatiquement.`
-        : `${payload.snippets.length} snippet(s) importé(s).`
+        ? `${payload.snippets.length} snippet(s) imported from a v1 export: cards will be repositioned automatically.`
+        : `${payload.snippets.length} snippet(s) imported.`
     );
   } catch (error) {
-    showMaintenance(`Import échoué : ${error && error.message ? error.message : String(error)}`);
+    showMaintenance(`Import failed: ${error && error.message ? error.message : String(error)}`);
   }
 });
 

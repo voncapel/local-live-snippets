@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<html lang="fr">
+<html lang="en">
   <head>
     <meta charset="utf-8" />
-    <title>Local Live Snippets — Paramètres</title>
+    <title>Local Live Snippets — Settings</title>
     <link rel="stylesheet" href="options.css" />
   </head>
   <body>
@@ -10,8 +10,8 @@
       <header>
         <h1>Local Live Snippets</h1>
         <p class="sub">
-          Captures périodiques de zones de pages, affichées sur votre page Nouvel Onglet.
-          Tout reste local à ce profil Chrome.
+          Periodic captures of page zones, displayed on your New Tab page.
+          Everything stays local to this Chrome profile.
         </p>
       </header>
 
@@ -19,172 +19,172 @@
         <div class="panel-head">
           <h2>Snippets</h2>
           <div class="row-actions">
-            <button id="capture-all" type="button" class="btn">Tout capturer</button>
-            <button id="new-snippet" type="button" class="btn btn-primary">Nouveau snippet</button>
+            <button id="capture-all" type="button" class="btn">Capture all</button>
+            <button id="new-snippet" type="button" class="btn btn-primary">New snippet</button>
           </div>
         </div>
         <ul id="snippet-list" class="snippet-list"></ul>
-        <p id="snippet-empty" class="muted" hidden>Aucun snippet. Commencez par « Nouveau snippet ».</p>
+        <p id="snippet-empty" class="muted" hidden>No snippets yet. Start with “New snippet”.</p>
       </section>
 
       <section class="panel" id="form-panel" hidden>
         <div class="panel-head">
-          <h2 id="form-title">Nouveau snippet</h2>
+          <h2 id="form-title">New snippet</h2>
         </div>
 
         <form id="snippet-form" autocomplete="off">
           <input type="hidden" id="f-id" />
 
           <div class="field">
-            <label for="f-name">Nom</label>
-            <input type="text" id="f-name" placeholder="Dashboard ventes" />
+            <label for="f-name">Name</label>
+            <input type="text" id="f-name" placeholder="Sales dashboard" />
           </div>
 
           <div class="field">
             <label for="f-url">URL <span class="req">*</span></label>
-            <input type="url" id="f-url" placeholder="https://exemple.com/dashboard" required />
-            <p class="hint">Doit commencer par http:// ou https://. La session du profil est réutilisée.</p>
+            <input type="url" id="f-url" placeholder="https://example.com/dashboard" required />
+            <p class="hint">Must start with http:// or https://. The profile session is reused.</p>
           </div>
 
           <fieldset class="field">
-            <legend>Zone à capturer</legend>
+            <legend>Zone to capture</legend>
             <label class="radio">
-              <input type="radio" name="mode" value="anchor" /> Zone dessinée (recommandé)
+              <input type="radio" name="mode" value="anchor" /> Drawn zone (recommended)
             </label>
             <label class="radio">
-              <input type="radio" name="mode" value="selector" /> Sélecteur CSS
+              <input type="radio" name="mode" value="selector" /> CSS selector
             </label>
             <label class="radio"><input type="radio" name="mode" value="rect" /> Rectangle (px)</label>
             <label class="radio">
-              <input type="radio" name="mode" value="viewport" /> Viewport entier
+              <input type="radio" name="mode" value="viewport" /> Full viewport
             </label>
           </fieldset>
 
           <div class="field mode-block" data-mode="anchor">
-            <label for="f-anchor">Ancre détectée</label>
+            <label for="f-anchor">Detected anchor</label>
             <div class="inline">
               <input type="text" id="f-anchor" readonly />
-              <button id="pick-zone" type="button" class="btn">Redéfinir la zone</button>
+              <button id="pick-zone" type="button" class="btn">Redefine zone</button>
             </div>
             <p class="hint" id="pick-hint">
-              Ouvre l'URL dans un onglet : dessinez un rectangle, Entrée valide, Échap annule.
+              Opens the URL in a tab: draw a rectangle, Enter confirms, Esc cancels.
             </p>
             <p class="hint" id="anchor-offset"></p>
           </div>
 
           <div class="field mode-block" data-mode="selector">
-            <label for="f-selector">Sélecteur CSS <span class="req">*</span></label>
+            <label for="f-selector">CSS selector <span class="req">*</span></label>
             <input type="text" id="f-selector" placeholder="#main .stats-card" />
           </div>
 
           <div class="field mode-block" data-mode="rect">
-            <label>Rectangle (coordonnées de page, viewport de référence 1280&nbsp;px)</label>
+            <label>Rectangle (page coordinates, reference viewport 1280&nbsp;px)</label>
             <div class="grid4">
               <label class="tiny">x<input type="number" id="f-rect-x" value="0" min="0" step="1" /></label>
               <label class="tiny">y<input type="number" id="f-rect-y" value="0" min="0" step="1" /></label>
               <label class="tiny">
-                largeur<input type="number" id="f-rect-w" value="800" min="1" step="1" />
+                width<input type="number" id="f-rect-w" value="800" min="1" step="1" />
               </label>
               <label class="tiny">
-                hauteur<input type="number" id="f-rect-h" value="600" min="1" step="1" />
+                height<input type="number" id="f-rect-h" value="600" min="1" step="1" />
               </label>
             </div>
           </div>
 
           <div class="field">
-            <label for="f-wait">Attendre ce sélecteur avant capture (optionnel)</label>
+            <label for="f-wait">Wait for selector before capture (optional)</label>
             <input type="text" id="f-wait" placeholder=".chart-loaded" />
           </div>
 
           <div class="field">
-            <label for="f-expired">Sélecteur « session expirée » (optionnel)</label>
+            <label for="f-expired">Session expired selector (optional)</label>
             <input type="text" id="f-expired" placeholder="form.login, #login-password" />
-            <p class="hint">S'il est présent, la dernière bonne image est conservée.</p>
+            <p class="hint">If present, the last good image is kept.</p>
           </div>
 
           <div class="grid3">
             <div class="field">
-              <label for="f-delay">Délai après chargement (ms)</label>
+              <label for="f-delay">Delay after load (ms)</label>
               <input type="number" id="f-delay" value="1500" min="0" max="60000" step="100" />
             </div>
             <div class="field">
-              <label for="f-interval">Intervalle (minutes)</label>
+              <label for="f-interval">Interval (minutes)</label>
               <input type="number" id="f-interval" value="15" min="1" max="1440" step="1" />
             </div>
             <div class="field">
-              <label for="f-vw">Largeur de viewport de capture</label>
+              <label for="f-vw">Capture viewport width</label>
               <input type="number" id="f-vw" value="0" min="0" max="3840" step="10" />
-              <p class="hint">0 = réglage global.</p>
+              <p class="hint">0 = global setting.</p>
             </div>
           </div>
 
-          <label class="check"><input type="checkbox" id="f-freeze" checked /> Geler animations et transitions</label>
+          <label class="check"><input type="checkbox" id="f-freeze" checked /> Freeze animations and transitions</label>
           <label class="check">
             <input type="checkbox" id="f-scroll-prime" checked />
-            Pré-scroller la page pour charger les images différées
+            Pre-scroll the page to load lazy images
           </label>
           <p class="hint">
-            À décocher sur les flux infinis qui rechargent leur contenu quand on les parcourt.
+            Uncheck on infinite feeds that reload their content as you scroll through them.
           </p>
-          <label class="check"><input type="checkbox" id="f-enabled" checked /> Activé</label>
+          <label class="check"><input type="checkbox" id="f-enabled" checked /> Enabled</label>
 
           <p id="form-error" class="error" hidden></p>
 
           <div class="row-actions">
-            <button type="submit" class="btn btn-primary">Enregistrer</button>
-            <button id="form-cancel" type="button" class="btn btn-ghost">Annuler</button>
+            <button type="submit" class="btn btn-primary">Save</button>
+            <button id="form-cancel" type="button" class="btn btn-ghost">Cancel</button>
           </div>
         </form>
       </section>
 
       <section class="panel">
-        <div class="panel-head"><h2>Réglages globaux</h2></div>
+        <div class="panel-head"><h2>Global settings</h2></div>
         <div class="grid4">
           <div class="field">
-            <label for="s-vw">Largeur viewport</label>
+            <label for="s-vw">Viewport width</label>
             <input type="number" id="s-vw" min="320" max="3840" step="10" />
           </div>
           <div class="field">
-            <label for="s-vh">Hauteur viewport</label>
+            <label for="s-vh">Viewport height</label>
             <input type="number" id="s-vh" min="240" max="4320" step="10" />
           </div>
           <div class="field">
-            <label for="s-tick">Tick global (min)</label>
+            <label for="s-tick">Global tick (min)</label>
             <input type="number" id="s-tick" min="1" max="1440" step="1" />
           </div>
         </div>
         <div class="grid3">
           <div class="field">
-            <label for="s-wait-timeout">Timeout d'attente de sélecteur (ms)</label>
+            <label for="s-wait-timeout">Selector wait timeout (ms)</label>
             <input type="number" id="s-wait-timeout" min="1000" max="120000" step="500" />
           </div>
           <div class="field">
-            <label for="s-images-timeout">Timeout de chargement des images (ms)</label>
+            <label for="s-images-timeout">Image loading timeout (ms)</label>
             <input type="number" id="s-images-timeout" min="0" max="60000" step="500" />
-            <p class="hint">Attente maximale des images de la zone ciblée. 0 = ne pas attendre.</p>
+            <p class="hint">Maximum wait for the images inside the target zone. 0 = do not wait.</p>
           </div>
         </div>
         <label class="check">
           <input type="checkbox" id="s-capture-window" />
-          Utiliser une fenêtre de capture dédiée (recommandé si captures noires)
+          Use a dedicated capture window (recommended if captures come out black)
         </label>
         <p class="hint">
-          Une petite fenêtre popup non focalisée sert de surface de rendu : son onglet est actif,
-          donc réellement « visible » pour Chrome. Elle apparaît brièvement derrière la fenêtre
-          courante et se referme dès que la file de capture est vide.
+          A small unfocused popup window is used as the render surface: its tab is active, so it is
+          genuinely “visible” to Chrome. It appears briefly behind the current window and closes as
+          soon as the capture queue is empty.
         </p>
         <div class="row-actions">
-          <button id="save-settings" type="button" class="btn btn-primary">Enregistrer les réglages</button>
-          <span id="settings-saved" class="muted" hidden>Enregistré.</span>
+          <button id="save-settings" type="button" class="btn btn-primary">Save settings</button>
+          <span id="settings-saved" class="muted" hidden>Saved.</span>
         </div>
       </section>
 
       <section class="panel">
         <div class="panel-head"><h2>Maintenance</h2></div>
         <div class="row-actions">
-          <button id="export-config" type="button" class="btn">Exporter la config (JSON)</button>
-          <button id="import-config" type="button" class="btn">Importer une config</button>
-          <button id="clear-images" type="button" class="btn btn-danger">Vider toutes les images</button>
+          <button id="export-config" type="button" class="btn">Export config (JSON)</button>
+          <button id="import-config" type="button" class="btn">Import config</button>
+          <button id="clear-images" type="button" class="btn btn-danger">Clear all images</button>
         </div>
         <input type="file" id="import-file" accept="application/json,.json" hidden />
         <p id="maintenance-msg" class="muted" hidden></p>

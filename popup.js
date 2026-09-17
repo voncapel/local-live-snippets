@@ -7,21 +7,21 @@ const emptyEl = document.getElementById("empty");
 const countEl = document.getElementById("count");
 
 const STATUS_LABELS = {
-  ok: "à jour",
-  capturing: "capture en cours…",
-  session_expired: "session expirée",
-  selector_not_found: "sélecteur introuvable",
-  error: "erreur",
+  ok: "up to date",
+  capturing: "capturing…",
+  session_expired: "session expired",
+  selector_not_found: "selector not found",
+  error: "error",
 };
 
 function relativeTime(timestamp) {
-  if (!timestamp) return "jamais capturé";
+  if (!timestamp) return "never captured";
   const minutes = Math.round((Date.now() - timestamp) / 60000);
-  if (minutes < 1) return "à l'instant";
-  if (minutes < 60) return `il y a ${minutes} min`;
+  if (minutes < 1) return "just now";
+  if (minutes < 60) return `${minutes} min ago`;
   const hours = Math.round(minutes / 60);
-  if (hours < 24) return `il y a ${hours} h`;
-  return `il y a ${Math.round(hours / 24)} j`;
+  if (hours < 24) return `${hours} h ago`;
+  return `${Math.round(hours / 24)} d ago`;
 }
 
 function stalenessClass(snippet, entry) {
@@ -61,7 +61,7 @@ async function render() {
 
     const main = el("div", "item-main");
     main.appendChild(el("div", "item-name", snippet.name));
-    const statusText = `${STATUS_LABELS[status] || "jamais capturé"} · ${relativeTime(
+    const statusText = `${STATUS_LABELS[status] || "never captured"} · ${relativeTime(
       (entry && entry.capturedAt) || 0
     )}`;
     const statusLine = el("div", `item-status${isBad ? " bad" : ""}`, statusText);
@@ -72,14 +72,14 @@ async function render() {
 
     const openBtn = el("button", "icon-btn", "↗");
     openBtn.type = "button";
-    openBtn.title = `Ouvrir ${snippet.url}`;
+    openBtn.title = `Open ${snippet.url}`;
     openBtn.addEventListener("click", () => chrome.tabs.create({ url: snippet.url, active: true }));
     li.appendChild(openBtn);
 
     const refreshBtn = el("button", "icon-btn", busy ? "…" : "↻");
     refreshBtn.type = "button";
     refreshBtn.disabled = busy;
-    refreshBtn.title = busy ? "Capture en cours…" : "Capturer maintenant";
+    refreshBtn.title = busy ? "Capturing…" : "Capture now";
     refreshBtn.addEventListener("click", async () => {
       refreshBtn.disabled = true;
       await chrome.runtime.sendMessage({ type: "captureNow", snippetId: snippet.id });
@@ -104,19 +104,19 @@ document.getElementById("pick-zone").addEventListener("click", async () => {
   try {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     if (!tab || !tab.id) {
-      showPickError("Aucun onglet actif.");
+      showPickError("No active tab.");
       return;
     }
     if (!/^https?:\/\//i.test(tab.url || "")) {
       showPickError(
-        "Cette page n'est pas capturable : les pages chrome://, le Chrome Web Store et les PDF ne sont pas supportés."
+        "This page cannot be captured: chrome:// pages, the Chrome Web Store and PDFs are not supported."
       );
       return;
     }
     await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ["picker.js"] });
     window.close();
   } catch (error) {
-    showPickError(`Injection impossible : ${error && error.message ? error.message : String(error)}`);
+    showPickError(`Injection failed: ${error && error.message ? error.message : String(error)}`);
   }
 });
 

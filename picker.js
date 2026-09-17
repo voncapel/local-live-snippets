@@ -197,12 +197,12 @@
       "box-sizing:border-box",
       "display:inline-block",
       "padding:5px 12px",
-      "border-radius:7px",
+      "border-radius:999px",
       "font:600 12px/1.3 -apple-system,BlinkMacSystemFont,'Segoe UI',Inter,Roboto,sans-serif",
       "cursor:pointer",
-      primary ? "background:#2563eb" : "background:#374151",
-      "color:#ffffff",
-      "border:1px solid rgba(255,255,255,0.14)",
+      primary ? "background:#b6ff5c" : "background:rgba(255,255,255,0.08)",
+      primary ? "color:#0c1206" : "color:#f2f3f7",
+      "border:1px solid rgba(255,255,255,0.16)",
     ]);
     return btn;
   }
@@ -224,10 +224,10 @@
     ]);
 
     veil = document.createElement("div");
-    css(veil, ["position:absolute", "inset:0", "background:rgba(15,23,42,0.45)"]);
+    css(veil, ["position:absolute", "inset:0", "background:rgba(8,9,13,0.5)"]);
 
     banner = document.createElement("div");
-    banner.textContent = "Dessinez un rectangle · Entrée pour valider · Échap pour annuler";
+    banner.textContent = "Draw a rectangle · Enter to confirm · Esc to cancel";
     css(banner, [
       "position:absolute",
       "top:14px",
@@ -236,8 +236,10 @@
       "max-width:90vw",
       "padding:8px 16px",
       "border-radius:999px",
-      "background:#0f172a",
-      "color:#f8fafc",
+      "background:rgba(22,23,32,0.85)",
+      "color:#f2f3f7",
+      "backdrop-filter:blur(16px)",
+      "border:1px solid rgba(255,255,255,0.16)",
       "font:600 13px/1.4 -apple-system,BlinkMacSystemFont,'Segoe UI',Inter,Roboto,sans-serif",
       "box-shadow:0 6px 20px rgba(0,0,0,0.4)",
       "white-space:nowrap",
@@ -250,9 +252,9 @@
     css(box, [
       "position:absolute",
       "box-sizing:border-box",
-      "border:1px solid #60a5fa",
-      "outline:1px solid rgba(15,23,42,0.6)",
-      "box-shadow:0 0 0 100vmax rgba(15,23,42,0.45)",
+      "border:1px solid #b6ff5c",
+      "outline:1px solid rgba(8,9,13,0.6)",
+      "box-shadow:0 0 0 100vmax rgba(8,9,13,0.5), 0 0 14px rgba(182,255,92,0.35)",
       "cursor:move",
       "display:none",
     ]);
@@ -262,8 +264,8 @@
       "position:absolute",
       "padding:2px 7px",
       "border-radius:5px",
-      "background:#0f172a",
-      "color:#f8fafc",
+      "background:rgba(22,23,32,0.9)",
+      "color:#b6ff5c",
       "font:600 11px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace",
       "white-space:nowrap",
       "pointer-events:none",
@@ -279,8 +281,10 @@
       "gap:8px",
       "max-width:min(560px,92vw)",
       "padding:7px 9px",
-      "border-radius:10px",
-      "background:#111827",
+      "border-radius:14px",
+      "background:rgba(22,23,32,0.85)",
+      "backdrop-filter:blur(16px)",
+      "border:1px solid rgba(255,255,255,0.16)",
       "box-shadow:0 8px 24px rgba(0,0,0,0.45)",
       "cursor:default",
     ]);
@@ -290,7 +294,7 @@
       "flex:1 1 auto",
       "min-width:0",
       "max-width:300px",
-      "color:#cbd5e1",
+      "color:#8b8fa3",
       "font:11px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace",
       "overflow:hidden",
       "text-overflow:ellipsis",
@@ -298,8 +302,8 @@
       "pointer-events:none",
     ]);
 
-    validateBtn = makeButton("Valider", true);
-    const cancelBtn = makeButton("Annuler", false);
+    validateBtn = makeButton("Confirm", true);
+    const cancelBtn = makeButton("Cancel", false);
     validateBtn.addEventListener("click", (event) => {
       event.preventDefault();
       event.stopPropagation();

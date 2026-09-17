@@ -1,36 +1,39 @@
 <!DOCTYPE html>
-<html lang="fr">
+<html lang="en">
   <head>
     <meta charset="utf-8" />
-    <title>Nouvel onglet</title>
+    <title>New Tab</title>
     <link rel="stylesheet" href="newtab.css" />
   </head>
   <body>
+    <div class="glow glow-a"></div>
+    <div class="glow glow-b"></div>
+
     <header class="topbar">
       <div class="topbar-left">
-        <h1>Local Live Snippets</h1>
+        <span class="brand"><span class="brand-mark"></span>Live Snippets</span>
         <span id="clock" class="clock"></span>
       </div>
       <div class="topbar-right">
         <span id="run-status" class="run-status" hidden></span>
-        <button id="refresh-all" type="button" class="btn">Tout rafraîchir</button>
-        <button id="open-options" type="button" class="btn btn-ghost">Paramètres</button>
+        <button id="refresh-all" type="button" class="btn btn-accent">Refresh all</button>
+        <button id="open-options" type="button" class="btn">Settings</button>
       </div>
     </header>
 
     <main>
       <section id="empty" class="empty" hidden>
-        <h2>Aucun snippet pour l'instant</h2>
+        <h2>Nothing here yet</h2>
         <p>
-          Ouvrez la page qui vous intéresse, cliquez sur l'icône de l'extension puis sur
-          «&nbsp;Capturer une zone de cette page&nbsp;» et dessinez un rectangle&nbsp;: la zone sera
-          capturée périodiquement et affichée ici.
+          Open any page, click the extension icon, then <strong>Capture a zone</strong> and draw a
+          rectangle. It will be captured periodically and shown here.
         </p>
-        <button id="empty-cta" type="button" class="btn">Ouvrir les paramètres</button>
+        <button id="empty-cta" type="button" class="btn btn-accent">Open settings</button>
       </section>
 
-      <div id="grid" class="grid">
-        <div id="ghost" class="ghost" hidden></div>
+      <div id="board" class="board">
+        <div id="guide-x" class="guide guide-x" hidden></div>
+        <div id="guide-y" class="guide guide-y" hidden></div>
       </div>
     </main>
 

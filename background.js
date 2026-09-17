@@ -156,7 +156,7 @@ async function recoverOrphans() {
   if (state.runningSnippetId) {
     await patchMeta(state.runningSnippetId, {
       status: "error",
-      lastError: "Capture interrompue (service worker redémarré).",
+      lastError: "Capture interrupted (service worker restarted).",
       lastAttemptAt: Date.now(),
       queued: false,
     });
@@ -271,7 +271,7 @@ function waitForTabComplete(tabId, timeoutMs = 30000) {
 /** Ouvre l'URL dans un nouvel onglet et y injecte le picker (flux Options / NTP). */
 async function startPicker(url, snippetId) {
   if (!HTTP_URL_RE.test(String(url || ""))) {
-    throw new Error("URL non supportée : seules les pages http(s) peuvent être capturées.");
+    throw new Error("Unsupported URL: only http(s) pages can be captured.");
   }
   const tab = await chrome.tabs.create({ url, active: true });
   await waitForTabComplete(tab.id);

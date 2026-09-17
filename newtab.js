@@ -1,28 +1,34 @@
 // Page Nouvel Onglet : lit IndexedDB + meta instantanément, puis demande au SW
 // de rafraîchir ce qui est périmé. Aucun accès réseau depuis cette page.
-// Les cartes sont posées librement sur une grille à 12 colonnes (drag + resize).
+// Les cartes sont posées librement (drag + resize homothétique) avec snapping
+// sur les bords des autres cartes. Les positions sont stockées dans une largeur
+// de référence et mises à l'échelle selon la largeur de la fenêtre.
 
 import { deleteImage, getAllImages, getImage } from "./db.js";
 import {
-  GRID_COLUMNS,
-  GRID_GAP,
+  LAYOUT_DEFAULT_WIDTH,
+  LAYOUT_GAP,
+  LAYOUT_MIN_WIDTH,
+  LAYOUT_REF_WIDTH,
+  aspectOf,
+  boxOf,
   deleteSnippet,
-  fitsInGrid,
-  findFreeSlot,
+  findFreeSpot,
+  fitsFree,
   getMeta,
   getSnippets,
-  layoutSizeForImage,
   upsertSnippet,
 } from "./storage.js";
 
-const grid = document.getElementById("grid");
-const ghost = document.getElementById("ghost");
+const board = document.getElementById("board");
+const guideX = document.getElementById("guide-x");
+const guideY = document.getElementById("guide-y");
 const emptyBox = document.getElementById("empty");
 const clockEl = document.getElementById("clock");
 const runStatusEl = document.getElementById("run-status");
 
-/** id -> { card, head, dot, title, age, refreshBtn, menuBtn, fitBtn, body, handle,
- *          objectUrl, snippet, metaEntry, image } */
+/** id -> { card, img, pill, pillDot, pillHost, foot, name, age, refreshBtn, menuBtn,
+ *          handle, objectUrl, snippet, metaEntry, image, aspect } */
 const cards = new Map();
 let snippets = [];
 let meta = {};
@@ -32,16 +38,19 @@ let pendingReload = false;
 /** Menu « ⋯ » ouvert, s'il y en a un. */
 let openMenu = null;
 
+const SNAP_PX = 8;
+const MOVE_THRESHOLD = 4;
+
 function relativeTime(timestamp) {
-  if (!timestamp) return "jamais capturé";
+  if (!timestamp) return "never captured";
   const seconds = Math.max(0, Math.round((Date.now() - timestamp) / 1000));
-  if (seconds < 60) return "à l'instant";
+  if (seconds < 60) return "just now";
   const minutes = Math.round(seconds / 60);
-  if (minutes < 60) return `il y a ${minutes} min`;
+  if (minutes < 60) return `${minutes} min ago`;
   const hours = Math.round(minutes / 60);
-  if (hours < 24) return `il y a ${hours} h`;
+  if (hours < 24) return `${hours} h ago`;
   const days = Math.round(hours / 24);
-  return `il y a ${days} j`;
+  return `${days} d ago`;
 }
 
 function stalenessClass(snippet, metaEntry) {
@@ -54,6 +63,14 @@ function stalenessClass(snippet, metaEntry) {
   if (age < interval) return "fresh";
   if (age < interval * 3) return "aging";
   return "stale";
+}
+
+function hostOf(url) {
+  try {
+    return new URL(url).hostname.replace(/^www\./, "");
+  } catch (_) {
+    return url;
+  }
 }
 
 function el(tag, className, text) {
@@ -78,73 +95,149 @@ async function captureNow(snippetId) {
 
 /* ------------------------------ géométrie ------------------------------ */
 
-/** Largeur d'une colonne (gaps compris) pour la largeur courante du conteneur. */
-function cellSize() {
-  const total = grid.clientWidth || 1200;
-  return (total - GRID_GAP * (GRID_COLUMNS - 1)) / GRID_COLUMNS;
+/** Facteur pixels de référence -> pixels écran. */
+function scale() {
+  return (board.clientWidth || LAYOUT_REF_WIDTH) / LAYOUT_REF_WIDTH;
 }
 
-function layoutToPixels(layout) {
-  const cell = cellSize();
-  return {
-    left: layout.col * (cell + GRID_GAP),
-    top: layout.row * (cell + GRID_GAP),
-    width: layout.w * cell + (layout.w - 1) * GRID_GAP,
-    height: layout.h * cell + (layout.h - 1) * GRID_GAP,
-  };
+function boxToScreen(box) {
+  const k = scale();
+  return { left: box.x * k, top: box.y * k, width: box.w * k, height: box.h * k };
 }
 
-/** Convertit une position/taille en pixels vers les unités de grille les plus proches. */
-function pixelsToLayout(px) {
-  const cell = cellSize();
-  const step = cell + GRID_GAP;
-  const w = Math.min(GRID_COLUMNS, Math.max(2, Math.round((px.width + GRID_GAP) / step)));
-  const h = Math.max(1, Math.round((px.height + GRID_GAP) / step));
-  const col = Math.min(GRID_COLUMNS - w, Math.max(0, Math.round(px.left / step)));
-  const row = Math.max(0, Math.round(px.top / step));
-  return { col, row, w, h };
+function entryBox(entry) {
+  return boxOf(entry.snippet.layout, entry.aspect);
 }
 
-/** Layouts occupés, sauf celui du snippet en cours de manipulation. */
-function takenLayouts(exceptId) {
-  return snippets
-    .filter((s) => s.id !== exceptId && s.layout)
-    .map((s) => s.layout);
+/** Boîtes occupées, sauf celle du snippet en cours de manipulation. */
+function takenBoxes(exceptId) {
+  const out = [];
+  for (const entry of cards.values()) {
+    if (entry.snippet.id === exceptId || !entry.snippet.layout) continue;
+    out.push(entryBox(entry));
+  }
+  return out;
 }
 
-function applyLayout(entry) {
-  const layout = entry.snippet.layout;
-  if (!layout) return;
-  const px = layoutToPixels(layout);
+function placeCard(entry, px) {
   entry.card.style.left = `${px.left}px`;
   entry.card.style.top = `${px.top}px`;
   entry.card.style.width = `${px.width}px`;
   entry.card.style.height = `${px.height}px`;
 }
 
-function updateGridHeight() {
-  const rows = snippets.reduce((acc, s) => (s.layout ? Math.max(acc, s.layout.row + s.layout.h) : acc), 0);
-  const cell = cellSize();
-  grid.style.height = rows ? `${rows * cell + (rows - 1) * GRID_GAP}px` : "0px";
+function applyLayout(entry) {
+  if (!entry.snippet.layout) return;
+  placeCard(entry, boxToScreen(entryBox(entry)));
+}
+
+function updateBoardHeight() {
+  let bottom = 0;
+  for (const entry of cards.values()) {
+    if (!entry.snippet.layout) continue;
+    const b = entryBox(entry);
+    bottom = Math.max(bottom, b.y + b.h);
+  }
+  board.style.height = `${Math.ceil(bottom * scale())}px`;
 }
 
 function applyAllLayouts() {
   for (const entry of cards.values()) applyLayout(entry);
-  updateGridHeight();
+  updateBoardHeight();
 }
 
 /** Attribue un layout aux snippets qui n'en ont pas et le persiste. */
 async function assignMissingLayouts(images) {
+  const taken = snippets.filter((s) => s.layout).map((s) => boxOf(s.layout, aspectOf(images.get(s.id))));
   const toSave = [];
   for (const snippet of snippets) {
     if (snippet.layout) continue;
-    const size = layoutSizeForImage(images ? images.get(snippet.id) : null);
-    snippet.layout = findFreeSlot(size.w, size.h, takenLayouts(snippet.id));
+    const aspect = aspectOf(images.get(snippet.id));
+    const w = LAYOUT_DEFAULT_WIDTH;
+    snippet.layout = findFreeSpot(w, Math.round(w * aspect), taken);
+    taken.push(boxOf(snippet.layout, aspect));
     toSave.push(snippet);
   }
   for (const snippet of toSave) {
-    await upsertSnippet(snippet).catch((error) => console.warn("[LLS] layout initial", error));
+    await upsertSnippet(snippet).catch((error) => console.warn("[LLS] initial layout", error));
   }
+}
+
+/* ------------------------------- snapping ------------------------------- */
+
+/**
+ * Snappe une boîte (pixels de référence) sur les bords des autres boîtes et
+ * du plateau. `mode` = "move" (x et y libres) ou "resize" (coin bas-droit).
+ * Renvoie la boîte ajustée et les guides à afficher (en pixels de référence).
+ */
+function snapBox(box, taken, mode) {
+  const tol = SNAP_PX / scale();
+  const xTargets = [0, LAYOUT_REF_WIDTH];
+  const yTargets = [0];
+  for (const b of taken) {
+    xTargets.push(b.x, b.x + b.w, b.x + b.w + LAYOUT_GAP, b.x - LAYOUT_GAP);
+    yTargets.push(b.y, b.y + b.h, b.y + b.h + LAYOUT_GAP, b.y - LAYOUT_GAP);
+  }
+
+  const out = { ...box };
+  let guideXPos = null;
+  let guideYPos = null;
+
+  if (mode === "move") {
+    let best = { d: tol, dx: 0, at: null };
+    for (const t of xTargets) {
+      for (const edge of [box.x, box.x + box.w]) {
+        const d = Math.abs(t - edge);
+        if (d < best.d) best = { d, dx: t - edge, at: t };
+      }
+    }
+    out.x += best.dx;
+    guideXPos = best.at;
+
+    best = { d: tol, dy: 0, at: null };
+    for (const t of yTargets) {
+      for (const edge of [box.y, box.y + box.h]) {
+        const d = Math.abs(t - edge);
+        if (d < best.d) best = { d, dy: t - edge, at: t };
+      }
+    }
+    out.y += best.dy;
+    guideYPos = best.at;
+  } else {
+    // Resize homothétique : on snappe le bord droit (largeur), ou à défaut le
+    // bord bas, et on recalcule l'autre dimension.
+    const aspect = box.h / box.w;
+    let best = { d: tol, w: box.w, at: null, axis: null };
+    for (const t of xTargets) {
+      const d = Math.abs(t - (box.x + box.w));
+      if (d < best.d) best = { d, w: t - box.x, at: t, axis: "x" };
+    }
+    for (const t of yTargets) {
+      const d = Math.abs(t - (box.y + box.h));
+      if (d < best.d) best = { d, w: (t - box.y) / aspect, at: t, axis: "y" };
+    }
+    if (best.axis && best.w >= LAYOUT_MIN_WIDTH) {
+      out.w = Math.round(best.w);
+      out.h = Math.round(out.w * aspect);
+      if (best.axis === "x") guideXPos = best.at;
+      else guideYPos = best.at;
+    }
+  }
+
+  return { box: out, guideX: guideXPos, guideY: guideYPos };
+}
+
+function showGuides(gx, gy) {
+  const k = scale();
+  guideX.hidden = gx === null;
+  guideY.hidden = gy === null;
+  if (gx !== null) guideX.style.left = `${gx * k}px`;
+  if (gy !== null) guideY.style.top = `${gy * k}px`;
+}
+
+function hideGuides() {
+  guideX.hidden = true;
+  guideY.hidden = true;
 }
 
 /* -------------------------------- cartes -------------------------------- */
@@ -153,47 +246,50 @@ function buildNotice(snippet, metaEntry, status, hasImage) {
   const lastError = (metaEntry && metaEntry.lastError) || "";
 
   if (status === "session_expired") {
-    const box = el("div", `notice bad${hasImage ? " on-image" : ""}`);
-    box.appendChild(el("strong", null, "Session expirée"));
-    box.appendChild(
-      el("span", null, hasImage ? "Image conservée, non mise à jour." : "Aucune image disponible.")
-    );
-    const btn = el("button", "btn", "Ouvrir le site pour se reconnecter");
+    const box = el("div", "notice bad");
+    box.appendChild(el("strong", null, "Session expired"));
+    box.appendChild(el("span", null, hasImage ? "Last good image kept." : "No image yet."));
+    const btn = el("button", "btn btn-small", "Open site to sign in");
     btn.type = "button";
-    btn.addEventListener("click", () => openUrl(snippet.url));
+    btn.addEventListener("click", (event) => {
+      event.stopPropagation();
+      openUrl(snippet.url);
+    });
     box.appendChild(btn);
     return box;
   }
 
   if (status === "selector_not_found") {
-    const box = el("div", `notice bad${hasImage ? " on-image" : ""}`);
-    box.appendChild(el("strong", null, "Sélecteur introuvable"));
+    const box = el("div", "notice bad");
+    box.appendChild(el("strong", null, "Selector not found"));
     box.appendChild(el("span", "err-detail", snippet.selector || snippet.anchorSelector || lastError));
     return box;
   }
 
   if (status === "error") {
-    const box = el("div", `notice bad${hasImage ? " on-image" : ""}`);
-    box.appendChild(el("strong", null, "Erreur de capture"));
+    const box = el("div", "notice bad");
+    box.appendChild(el("strong", null, "Capture failed"));
     if (lastError) box.appendChild(el("span", "err-detail", lastError));
     return box;
   }
 
   if (!hasImage && status !== "capturing") {
     const box = el("div", "notice");
-    box.appendChild(el("strong", null, "Jamais capturé"));
-    box.appendChild(el("span", null, "La première capture partira au prochain rafraîchissement."));
-    const btn = el("button", "btn", "Capturer maintenant");
+    box.appendChild(el("strong", null, "Not captured yet"));
+    const btn = el("button", "btn btn-small", "Capture now");
     btn.type = "button";
-    btn.addEventListener("click", () => captureNow(snippet.id));
+    btn.addEventListener("click", (event) => {
+      event.stopPropagation();
+      captureNow(snippet.id);
+    });
     box.appendChild(btn);
     return box;
   }
 
   if (!snippet.enabled) {
-    const box = el("div", `notice${hasImage ? " on-image" : ""}`);
-    box.appendChild(el("strong", null, "Désactivé"));
-    box.appendChild(el("span", null, "Ce snippet n'est plus rafraîchi automatiquement."));
+    const box = el("div", "notice");
+    box.appendChild(el("strong", null, "Paused"));
+    box.appendChild(el("span", null, "No automatic refresh."));
     return box;
   }
 
@@ -205,76 +301,58 @@ function renderCard(entry) {
   const { snippet, metaEntry, image } = entry;
   const status = (metaEntry && metaEntry.status) || (image ? "ok" : "never");
   const capturedAt = (image && image.capturedAt) || (metaEntry && metaEntry.capturedAt) || 0;
+  const tone = stalenessClass(snippet, metaEntry);
 
-  entry.dot.className = `dot ${stalenessClass(snippet, metaEntry)}`;
-  entry.title.textContent = snippet.name;
-  entry.title.title = snippet.url;
+  entry.card.dataset.tone = tone;
+  entry.pillHost.textContent = hostOf(snippet.url);
+  entry.pill.title = snippet.url;
+  entry.name.textContent = snippet.name;
   entry.age.textContent = relativeTime(capturedAt);
 
   const busy = status === "capturing" || (metaEntry && metaEntry.queued);
   entry.refreshBtn.disabled = Boolean(busy);
-  entry.refreshBtn.textContent = busy ? "…" : "↻";
-  entry.refreshBtn.title = busy ? "Capture en cours…" : "Capturer maintenant";
+  entry.refreshBtn.classList.toggle("spinning", Boolean(busy));
+  entry.refreshBtn.title = busy ? "Capturing…" : "Capture now";
 
-  entry.body.className = `card-body${snippet.fit === "cover" ? " fit-cover" : ""}`;
-  entry.fitBtn.title =
-    snippet.fit === "cover" ? "Afficher l'image entière (contain)" : "Remplir la carte (cover)";
-
-  entry.body.replaceChildren();
+  entry.overlay.replaceChildren();
 
   if (image && image.blob) {
     if (entry.objectUrl) URL.revokeObjectURL(entry.objectUrl);
     entry.objectUrl = URL.createObjectURL(image.blob);
-    const img = el("img");
-    img.src = entry.objectUrl;
-    img.alt = snippet.name;
-    img.title = `Ouvrir ${snippet.url}`;
-    img.draggable = false;
-    img.addEventListener("click", () => {
-      // Après un glisser, le clic de fin ne doit pas ouvrir l'URL.
-      if (entry.suppressClick) {
-        entry.suppressClick = false;
-        return;
-      }
-      openUrl(snippet.url);
-    });
-    entry.body.appendChild(img);
+    entry.img.src = entry.objectUrl;
+    entry.img.alt = snippet.name;
+    entry.img.hidden = false;
+  } else {
+    entry.img.removeAttribute("src");
+    entry.img.hidden = true;
   }
 
-  if (status === "capturing") {
-    entry.body.appendChild(el("span", "capturing", "Capture en cours…"));
-  }
-
+  const badges = el("div", "badges");
+  if (status === "capturing") badges.appendChild(el("span", "badge", "Capturing…"));
   if (status === "ok" && metaEntry && metaEntry.warning) {
-    const badge = el("span", "warning-badge", metaEntry.warning);
+    const badge = el("span", "badge warn", metaEntry.warning);
     badge.title = [metaEntry.warning, metaEntry.lastDiag].filter(Boolean).join("\n");
-    entry.body.appendChild(badge);
+    badges.appendChild(badge);
   }
-
-  // Rendu jugé vide : la piste la plus efficace est la fenêtre de capture dédiée.
   if (status === "ok" && metaEntry && metaEntry.blankSuspected) {
-    const box = el("div", "blank-hint");
-    const badge = el("span", "blank-badge", "⚠ Rendu probablement vide");
+    const badge = el("button", "badge warn", "Looks blank · use capture window");
+    badge.type = "button";
     badge.title = [
-      "La page a sans doute été rendue sans jamais être peinte (onglet en arrière-plan).",
+      "The page was probably never painted (background tab). Enable the dedicated capture window in Settings.",
       metaEntry.lastDiag,
     ]
       .filter(Boolean)
       .join("\n");
-    box.appendChild(badge);
-    const link = el("button", "blank-link", "Activer la fenêtre de capture dédiée");
-    link.type = "button";
-    link.title = "Ouvre les Paramètres, section « Réglages globaux »";
-    link.addEventListener("click", (event) => {
+    badge.addEventListener("click", (event) => {
       event.stopPropagation();
       chrome.runtime.openOptionsPage();
     });
-    box.appendChild(link);
-    entry.body.appendChild(box);
+    badges.appendChild(badge);
   }
+  if (badges.childElementCount) entry.overlay.appendChild(badges);
 
   const notice = buildNotice(snippet, metaEntry, status, Boolean(image && image.blob));
-  if (notice) entry.body.appendChild(notice);
+  if (notice) entry.overlay.appendChild(notice);
 }
 
 /* -------------------------------- menu ⋯ -------------------------------- */
@@ -288,7 +366,8 @@ function closeMenu() {
 function menuItem(label, onClick, className) {
   const btn = el("button", className, label);
   btn.type = "button";
-  btn.addEventListener("click", () => {
+  btn.addEventListener("click", (event) => {
+    event.stopPropagation();
     closeMenu();
     onClick();
   });
@@ -302,9 +381,9 @@ async function redefineZone(snippet) {
       url: snippet.url,
       snippetId: snippet.id,
     });
-    if (res && res.ok === false) window.alert(res.error || "Impossible d'ouvrir le sélecteur.");
+    if (res && res.ok === false) window.alert(res.error || "Could not open the picker.");
   } catch (error) {
-    window.alert(`Impossible d'ouvrir le sélecteur : ${error && error.message ? error.message : error}`);
+    window.alert(`Could not open the picker: ${error && error.message ? error.message : error}`);
   }
 }
 
@@ -312,35 +391,39 @@ function openCardMenu(entry) {
   closeMenu();
   const snippet = entry.snippet;
   const menu = el("div", "card-menu");
+  menu.addEventListener("pointerdown", (event) => event.stopPropagation());
 
-  menu.appendChild(menuItem("Redéfinir la zone", () => redefineZone(snippet)));
-
+  menu.appendChild(menuItem("Open page", () => openUrl(snippet.url)));
+  menu.appendChild(menuItem("Redefine zone", () => redefineZone(snippet)));
   menu.appendChild(
-    menuItem("Renommer", async () => {
-      const name = window.prompt("Nom du snippet", snippet.name);
+    menuItem("Rename", async () => {
+      const name = window.prompt("Snippet name", snippet.name);
       if (name === null) return;
       await upsertSnippet({ ...snippet, name: name.trim() || snippet.name });
     })
   );
-
   menu.appendChild(
-    menuItem("Intervalle", async () => {
-      const raw = window.prompt("Intervalle de capture (minutes)", String(snippet.intervalMinutes));
+    menuItem("Interval", async () => {
+      const raw = window.prompt("Capture interval (minutes)", String(snippet.intervalMinutes));
       if (raw === null) return;
       const minutes = Number(raw);
       if (!Number.isFinite(minutes) || minutes < 1) {
-        window.alert("Intervalle invalide : indiquez un nombre de minutes ≥ 1.");
+        window.alert("Invalid interval: enter a number of minutes ≥ 1.");
         return;
       }
       await upsertSnippet({ ...snippet, intervalMinutes: Math.round(minutes) });
     })
   );
-
+  menu.appendChild(
+    menuItem(snippet.enabled ? "Pause" : "Resume", async () => {
+      await upsertSnippet({ ...snippet, enabled: !snippet.enabled });
+    })
+  );
   menu.appendChild(
     menuItem(
-      "Supprimer",
+      "Delete",
       async () => {
-        if (!window.confirm(`Supprimer « ${snippet.name} » ? L'image capturée sera effacée.`)) return;
+        if (!window.confirm(`Delete “${snippet.name}”? The captured image will be erased.`)) return;
         await deleteImage(snippet.id).catch((error) => console.warn("[LLS] deleteImage", error));
         await deleteSnippet(snippet.id);
       },
@@ -349,6 +432,7 @@ function openCardMenu(entry) {
   );
 
   entry.card.appendChild(menu);
+  entry.card.classList.add("menu-open");
   openMenu = menu;
 }
 
@@ -365,77 +449,78 @@ document.addEventListener("keydown", (event) => {
 
 /* --------------------------- drag et resize --------------------------- */
 
-const MOVE_THRESHOLD = 4;
-
 function beginInteraction(entry, kind, event) {
   if (event.button !== 0) return;
+  if (!entry.snippet.layout) return;
   closeMenu();
   event.preventDefault();
 
-  const px = layoutToPixels(entry.snippet.layout);
+  const box = entryBox(entry);
   interacting = {
     entry,
     kind,
     pointerId: event.pointerId,
     startX: event.clientX,
     startY: event.clientY,
-    startPx: px,
-    currentPx: { ...px },
+    startBox: box,
+    result: null,
     moved: false,
   };
 
-  const target = event.currentTarget;
   try {
-    target.setPointerCapture(event.pointerId);
+    event.currentTarget.setPointerCapture(event.pointerId);
   } catch (_) {
     /* les listeners document assurent le suivi */
   }
-  entry.card.classList.add("dragging");
 }
 
 function onPointerMove(event) {
   if (!interacting || event.pointerId !== interacting.pointerId) return;
-  const dx = event.clientX - interacting.startX;
-  const dy = event.clientY - interacting.startY;
-  if (!interacting.moved && Math.abs(dx) + Math.abs(dy) < MOVE_THRESHOLD) return;
-  interacting.moved = true;
+  const k = scale();
+  const dx = (event.clientX - interacting.startX) / k;
+  const dy = (event.clientY - interacting.startY) / k;
+  if (!interacting.moved) {
+    if (Math.abs(dx) + Math.abs(dy) < MOVE_THRESHOLD / k) return;
+    interacting.moved = true;
+    interacting.entry.card.classList.add(interacting.kind === "move" ? "dragging" : "resizing");
+  }
 
-  const { entry, kind, startPx } = interacting;
-  const cell = cellSize();
-  const px =
-    kind === "move"
-      ? { ...startPx, left: startPx.left + dx, top: Math.max(0, startPx.top + dy) }
-      : {
-          ...startPx,
-          width: Math.max(2 * cell, startPx.width + dx),
-          height: Math.max(cell, startPx.height + dy),
-        };
-  interacting.currentPx = px;
+  const { entry, kind, startBox } = interacting;
+  const aspect = entry.aspect;
+  let box;
+  if (kind === "move") {
+    box = { ...startBox, x: startBox.x + dx, y: Math.max(0, startBox.y + dy) };
+  } else {
+    // Homothétique : la largeur suit la souris (le plus grand des deux axes).
+    const w = Math.max(LAYOUT_MIN_WIDTH, Math.max(startBox.w + dx, (startBox.h + dy) / aspect));
+    box = { ...startBox, w, h: w * aspect };
+  }
 
-  entry.card.style.left = `${px.left}px`;
-  entry.card.style.top = `${px.top}px`;
-  entry.card.style.width = `${px.width}px`;
-  entry.card.style.height = `${px.height}px`;
+  const taken = takenBoxes(entry.snippet.id);
+  const snapped = snapBox(box, taken, kind);
+  let final = snapped.box;
+  final.x = Math.min(LAYOUT_REF_WIDTH - final.w, Math.max(0, final.x));
+  if (kind === "resize" && final.x + final.w > LAYOUT_REF_WIDTH) {
+    final.w = LAYOUT_REF_WIDTH - final.x;
+    final.h = final.w * aspect;
+  }
+  final = { x: Math.round(final.x), y: Math.round(final.y), w: Math.round(final.w), h: Math.round(final.w * aspect) };
 
-  // Fantôme : position snappée que l'on obtiendra au relâchement.
-  const snapped = pixelsToLayout(px);
-  interacting.snapped = snapped;
-  const ghostPx = layoutToPixels(snapped);
-  ghost.hidden = false;
-  ghost.style.left = `${ghostPx.left}px`;
-  ghost.style.top = `${ghostPx.top}px`;
-  ghost.style.width = `${ghostPx.width}px`;
-  ghost.style.height = `${ghostPx.height}px`;
+  interacting.result = final;
+  const ok = fitsFree(final, taken);
+  entry.card.classList.toggle("blocked", !ok);
+  placeCard(entry, boxToScreen(final));
+  showGuides(snapped.guideX, snapped.guideY);
 }
 
 async function onPointerUp(event) {
   if (!interacting || event.pointerId !== interacting.pointerId) return;
-  const { entry, moved, snapped } = interacting;
+  const { entry, moved, result } = interacting;
   interacting = null;
-  ghost.hidden = true;
-  entry.card.classList.remove("dragging");
+  hideGuides();
+  entry.card.classList.remove("dragging", "resizing", "blocked");
 
-  if (!moved || !snapped) {
+  if (!moved || !result) {
     applyLayout(entry);
     await flushPendingReload();
     return;
@@ -447,12 +532,12 @@ async function onPointerUp(event) {
     entry.suppressClick = false;
   }, 300);
 
-  if (fitsInGrid(snapped, takenLayouts(entry.snippet.id))) {
-    entry.snippet = { ...entry.snippet, layout: snapped };
+  if (fitsFree(result, takenBoxes(entry.snippet.id))) {
+    entry.snippet = { ...entry.snippet, layout: { x: result.x, y: result.y, w: result.w } };
     const index = snippets.findIndex((s) => s.id === entry.snippet.id);
     if (index >= 0) snippets[index] = entry.snippet;
     applyLayout(entry);
-    updateGridHeight();
+    updateBoardHeight();
     await upsertSnippet(entry.snippet).catch((error) => console.warn("[LLS] layout", error));
   } else {
     // Chevauchement : on refuse et on remet la carte où elle était.
@@ -472,7 +557,7 @@ document.addEventListener("pointercancel", (event) => {
 async function flushPendingReload() {
   if (!pendingReload) return;
   pendingReload = false;
-  await load().catch((error) => console.warn("[LLS] reload différé", error));
+  await load().catch((error) => console.warn("[LLS] deferred reload", error));
 }
 
 /* ----------------------------- construction ----------------------------- */
@@ -480,57 +565,88 @@ async function flushPendingReload() {
 function createCard(snippet) {
   const card = el("article", "card");
 
-  const head = el("div", "card-head");
-  const dot = el("span", "dot");
-  const title = el("span", "card-title");
-  const age = el("span", "card-age");
+  const img = el("img");
+  img.draggable = false;
+  img.hidden = true;
 
-  const fitBtn = el("button", "icon-btn", "⤢");
-  fitBtn.type = "button";
+  const overlay = el("div", "overlay");
 
-  const refreshBtn = el("button", "icon-btn", "↻");
+  const pill = el("span", "pill");
+  const pillDot = el("span", "pill-dot");
+  const pillHost = el("span", "pill-host");
+  pill.append(pillDot, pillHost);
+
+  const tools = el("div", "tools");
+  const refreshBtn = el("button", "tool", "");
   refreshBtn.type = "button";
-  refreshBtn.addEventListener("click", () => captureNow(snippet.id));
-
-  const menuBtn = el("button", "icon-btn card-menu-btn", "⋯");
+  refreshBtn.innerHTML =
+    '<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M13.5 8a5.5 5.5 0 1 1-1.6-3.9"/><path d="M13.5 2.5v3h-3"/></svg>';
+  const menuBtn = el("button", "tool card-menu-btn", "");
   menuBtn.type = "button";
-  menuBtn.title = "Plus d'actions";
+  menuBtn.title = "More";
+  menuBtn.innerHTML =
+    '<svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><circle cx="3" cy="8" r="1.4"/><circle cx="8" cy="8" r="1.4"/><circle cx="13" cy="8" r="1.4"/></svg>';
+  tools.append(refreshBtn, menuBtn);
 
-  head.append(dot, title, age, fitBtn, refreshBtn, menuBtn);
+  const foot = el("div", "foot");
+  const name = el("span", "name");
+  const age = el("span", "age");
+  foot.append(name, age);
 
-  const body = el("div", "card-body");
   const handle = el("div", "resize-handle");
-  handle.title = "Redimensionner";
-  card.append(head, body, handle);
+  handle.title = "Resize";
+
+  card.append(img, overlay, tools, pill, foot, handle);
 
   const entry = {
     card,
-    head,
-    dot,
-    title,
+    img,
+    overlay,
+    pill,
+    pillDot,
+    pillHost,
+    foot,
+    name,
     age,
-    fitBtn,
     refreshBtn,
     menuBtn,
-    body,
     handle,
     objectUrl: null,
     suppressClick: false,
     snippet,
+    metaEntry: null,
+    image: null,
+    aspect: 0.75,
   };
 
-  fitBtn.addEventListener("click", async () => {
-    const fit = entry.snippet.fit === "cover" ? "contain" : "cover";
-    await upsertSnippet({ ...entry.snippet, fit });
+  refreshBtn.addEventListener("click", (event) => {
+    event.stopPropagation();
+    captureNow(entry.snippet.id);
   });
-  menuBtn.addEventListener("click", () => {
+  menuBtn.addEventListener("click", (event) => {
+    event.stopPropagation();
     if (openMenu && entry.card.contains(openMenu)) closeMenu();
     else openCardMenu(entry);
   });
+  for (const node of [refreshBtn, menuBtn, pill]) {
+    node.addEventListener("pointerdown", (event) => event.stopPropagation());
+  }
+  pill.addEventListener("click", (event) => {
+    event.stopPropagation();
+    openUrl(entry.snippet.url);
+  });
 
-  // Les boutons de l'en-tête ne doivent pas démarrer un glisser.
-  head.addEventListener("pointerdown", (event) => {
-    if (event.target.closest("button")) return;
+  card.addEventListener("click", (event) => {
+    if (event.target.closest("button, .card-menu, .pill")) return;
+    if (entry.suppressClick) {
+      entry.suppressClick = false;
+      return;
+    }
+    openUrl(entry.snippet.url);
+  });
+
+  card.addEventListener("pointerdown", (event) => {
+    if (event.target.closest("button, .card-menu, .resize-handle")) return;
     beginInteraction(entry, "move", event);
   });
   handle.addEventListener("pointerdown", (event) => beginInteraction(entry, "resize", event));
@@ -538,7 +654,7 @@ function createCard(snippet) {
   return entry;
 }
 
-/** Rendu complet de la grille. */
+/** Rendu complet du plateau. */
 function renderAll(images) {
   const seen = new Set();
   for (const snippet of snippets) {
@@ -547,11 +663,12 @@ function renderAll(images) {
     if (!entry) {
       entry = createCard(snippet);
       cards.set(snippet.id, entry);
-      grid.appendChild(entry.card);
+      board.appendChild(entry.card);
     }
     entry.snippet = snippet;
     entry.metaEntry = meta[snippet.id] || null;
     if (images) entry.image = images.get(snippet.id) || null;
+    entry.aspect = aspectOf(entry.image);
     renderCard(entry);
     applyLayout(entry);
   }
@@ -563,11 +680,11 @@ function renderAll(images) {
     cards.delete(id);
   }
 
-  updateGridHeight();
+  updateBoardHeight();
 
   const isEmpty = snippets.length === 0;
   emptyBox.hidden = !isEmpty;
-  grid.hidden = isEmpty;
+  board.hidden = isEmpty;
 }
 
 /** Recharge l'image d'un seul snippet et rerend sa carte. */
@@ -577,7 +694,13 @@ async function refreshOneCard(id) {
   entry.metaEntry = meta[id] || null;
   const image = await getImage(id);
   entry.image = image || null;
+  const aspect = aspectOf(entry.image);
   renderCard(entry);
+  if (Math.abs(aspect - entry.aspect) > 0.001 && !interacting) {
+    entry.aspect = aspect;
+    applyLayout(entry);
+    updateBoardHeight();
+  }
 }
 
 function updateAges() {
@@ -585,18 +708,19 @@ function updateAges() {
     const capturedAt =
       (entry.image && entry.image.capturedAt) || (entry.metaEntry && entry.metaEntry.capturedAt) || 0;
     entry.age.textContent = relativeTime(capturedAt);
-    entry.dot.className = `dot ${stalenessClass(entry.snippet, entry.metaEntry)}`;
+    entry.card.dataset.tone = stalenessClass(entry.snippet, entry.metaEntry);
   }
 }
 
 function updateClock() {
   const now = new Date();
-  clockEl.textContent = now.toLocaleString("fr-FR", {
+  clockEl.textContent = now.toLocaleString("en-US", {
     weekday: "long",
     day: "numeric",
     month: "long",
     hour: "2-digit",
     minute: "2-digit",
+    hour12: false,
   });
 }
 
@@ -611,8 +735,7 @@ function updateRunStatus() {
     return;
   }
   runStatusEl.hidden = false;
-  runStatusEl.textContent =
-    busy.length === 1 ? "1 capture en cours…" : `${busy.length} captures en attente…`;
+  runStatusEl.textContent = busy.length === 1 ? "1 capture running" : `${busy.length} captures queued`;
 }
 
 async function load() {
@@ -679,11 +802,11 @@ chrome.storage.onChanged.addListener((changes, area) => {
   }
 });
 
-// La largeur des colonnes suit la largeur du conteneur.
+// L'échelle suit la largeur du plateau.
 new ResizeObserver(() => {
   if (interacting) return;
   applyAllLayouts();
-}).observe(grid);
+}).observe(board);
 
 setInterval(updateAges, 30000);
 setInterval(updateClock, 30000);

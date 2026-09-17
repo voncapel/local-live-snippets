@@ -19,18 +19,18 @@ Chrome extension (Manifest V3) that periodically screenshots **zones of web page
 ## Use
 
 1. Go to the page you want to watch (log in first if needed).
-2. Click the extension icon → **Capturer une zone de cette page**.
+2. Click the extension icon → **Capture a zone of this page**.
 3. Drag a rectangle over the zone. Adjust it with the handles, then press **Enter** (Esc cancels).
 
-A snippet is created, captured immediately, and a new tab opens with your grid.
+A snippet is created, captured immediately, and a new tab opens with your board.
 
 On the New Tab page:
 
-- Drag a card by its header, resize it with the bottom-right handle. Layout is saved.
-- **⤢** toggles fit/fill. **↻** recaptures now. **⋯** → redefine zone, rename, interval, delete.
+- Drag a card anywhere; resize it from the bottom-right corner. Cards keep the aspect ratio of the capture and snap to each other's edges. Layout is saved and scales with the window width.
+- Controls appear on hover: **↻** recaptures now, **⋯** opens the menu (open page, redefine zone, rename, interval, pause, delete). The pill on the top right shows the source site and opens it.
 - Click the image to open the source page.
 
-Default refresh interval is 15 minutes (per snippet, editable in **Paramètres**).
+Default refresh interval is 15 minutes (per snippet, editable from the card menu or in **Settings**).
 
 ## About the "debugging this browser" bar
 
@@ -54,11 +54,11 @@ To hide the bar permanently, launch Chrome with:
 
 If a snippet comes out black or with grey placeholders (X/Twitter, lazy-loaded galleries…), the page refused to render in a background tab. The extension already fakes visibility and pre-scrolls to trigger lazy loading; if that is not enough:
 
-1. **Paramètres → Utiliser une fenêtre de capture dédiée**. Captures then run in a small unfocused popup window whose tab is really "visible" to Chrome. It appears briefly behind your current window and closes when the queue is empty.
+1. **Settings → Use a dedicated capture window**. Captures then run in a small unfocused popup window whose tab is really "visible" to Chrome. It appears briefly behind your current window and closes when the queue is empty.
 2. Per snippet: raise **Délai après chargement**, or set **Attendre ce sélecteur** to an element that only exists once the data is loaded.
 3. On infinite feeds, uncheck **Pré-scroller la page** for that snippet.
 
-Hover the status in Paramètres or the popup to see a short diagnostic of the last capture.
+Hover the status in Settings or the popup to see a short diagnostic of the last capture.
 
 ## How it works
 
@@ -80,7 +80,7 @@ manifest.json   MV3 manifest
 background.js   service worker: alarm, persisted queue, picker results
 capture.js      CDP capture pipeline
 picker.js       injected drag-to-select overlay
-newtab.*        New Tab page (free grid: drag, resize, menus)
+newtab.*        New Tab page (free board: drag, homothetic resize, snapping)
 options.*       settings, snippet editor, import/export
 popup.*         toolbar popup
 storage.js      config helpers    db.js  IndexedDB helpers

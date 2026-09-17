@@ -32,7 +32,7 @@ chrome.debugger.onDetach.addListener((source) => {
 export function withTimeout(promise, ms, label) {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
-      reject(new Error(`Délai dépassé (${ms} ms) : ${label}`));
+      reject(new Error(`Timed out (${ms} ms): ${label}`));
     }, ms);
     Promise.resolve(promise).then(
       (value) => {
@@ -84,7 +84,7 @@ async function evaluate(tabId, expression, options = {}) {
       (details.exception && (details.exception.description || details.exception.value)) ||
       details.text ||
       "exception inconnue";
-    throw new Error(`Erreur JS dans la page (${label}) : ${message}`);
+    throw new Error(`Page script error (${label}): ${message}`);
   }
   return res && res.result ? res.result.value : undefined;
 }
@@ -322,7 +322,7 @@ async function primeLazyContent(tabId, targetRect, options = {}) {
     return await evaluate(tabId, primeScript(config), {
       awaitPromise: true,
       timeoutMs: imagesTimeoutMs + scrollBudgetMs + 10000,
-      label: "amorçage du lazy-loading",
+      label: "lazy-loading priming",
     });
   } catch (error) {
     console.warn("[LLS] amorçage du lazy-loading", error);
@@ -427,7 +427,7 @@ export async function openCaptureTab() {
   const createProps = { url: "about:blank", active: false, pinned: true };
   if (typeof windowId === "number") createProps.windowId = windowId;
   const tab = await chrome.tabs.create(createProps);
-  if (!tab || typeof tab.id !== "number") throw new Error("Impossible de créer l'onglet de capture");
+  if (!tab || typeof tab.id !== "number") throw new Error("Could not create the capture tab");
   try {
     await chrome.tabs.update(tab.id, { muted: true, autoDiscardable: false });
   } catch (_) {
@@ -464,7 +464,7 @@ async function ensureCaptureWindow(existingWindowId, width, height) {
     top: 0,
     state: "normal",
   });
-  if (!win || typeof win.id !== "number") throw new Error("Impossible de créer la fenêtre de capture");
+  if (!win || typeof win.id !== "number") throw new Error("Could not create the capture window");
   const firstTab = win.tabs && win.tabs.length ? win.tabs[0] : null;
   return { windowId: win.id, tabId: firstTab ? firstTab.id : undefined, created: true };
 }
@@ -493,7 +493,7 @@ export async function openCaptureSurface(settings, existingWindowId, viewport = 
     if (typeof tabId !== "number") {
       const tabs = await chrome.tabs.query({ windowId: ensured.windowId });
       const first = tabs.find((t) => typeof t.id === "number");
-      if (!first) throw new Error("Fenêtre de capture sans onglet");
+      if (!first) throw new Error("Capture window has no tab");
       tabId = first.id;
     }
     try {
@@ -509,9 +509,9 @@ export async function openCaptureSurface(settings, existingWindowId, viewport = 
       tabId: await openCaptureTab(),
       windowId: null,
       keepTab: false,
-      warning: `Fenêtre de capture indisponible (${
+      warning: `Capture window unavailable (${
         error && error.message ? error.message : String(error)
-      }), repli sur un onglet d'arrière-plan`,
+      }), falling back to a background tab`,
     };
   }
 }
@@ -576,7 +576,7 @@ async function measureTarget(tabId, snippet, viewportWidth, viewportHeight) {
     const measured = await evaluate(tabId, MEASURE_JS(JSON.stringify(snippet.anchorSelector)), {
       awaitPromise: true,
       timeoutMs: 15000,
-      label: "mesure de l'ancre",
+      label: "anchor measurement",
     });
     if (measured && measured.width >= 1 && measured.height >= 1) {
       return {
@@ -593,7 +593,7 @@ async function measureTarget(tabId, snippet, viewportWidth, viewportHeight) {
     // Repli non bloquant : on capture aux coordonnées absolues mémorisées.
     return {
       clip: { ...snippet.rect },
-      warning: "Ancre introuvable, capture par coordonnées",
+      warning: "Anchor not found, captured by coordinates",
       notFound: null,
     };
   }
@@ -602,16 +602,16 @@ async function measureTarget(tabId, snippet, viewportWidth, viewportHeight) {
     const measured = await evaluate(tabId, MEASURE_JS(JSON.stringify(snippet.selector)), {
       awaitPromise: true,
       timeoutMs: 15000,
-      label: "mesure du sélecteur",
+      label: "selector measurement",
     });
     if (!measured) {
-      return { clip: null, warning: null, notFound: `Sélecteur introuvable : ${snippet.selector}` };
+      return { clip: null, warning: null, notFound: `Selector not found: ${snippet.selector}` };
     }
     if (measured.width < 1 || measured.height < 1) {
       return {
         clip: null,
         warning: null,
-        notFound: `Élément trouvé mais de taille nulle : ${snippet.selector}`,
+        notFound: `Element found but has zero size: ${snippet.selector}`,
       };
     }
     return {
@@ -653,7 +653,7 @@ async function estimateTargetRect(tabId, snippet, viewportWidth, viewportHeight)
         const r = el.getBoundingClientRect();
         return { x: r.x + window.scrollX, y: r.y + window.scrollY, width: r.width, height: r.height };
       })()`,
-      { label: "rect approximatif" }
+      { label: "approximate rect" }
     ).catch(() => null);
     if (measured && measured.width >= 1 && measured.height >= 1) {
       if (snippet.mode === "anchor") {
@@ -692,7 +692,7 @@ async function clampClip(tabId, raw) {
         height: Math.max(d.scrollHeight, b ? b.scrollHeight : 0, d.clientHeight),
       };
     })()`,
-    { label: "taille du document" }
+    { label: "document size" }
   ).catch(() => null);
   if (docSize && docSize.width >= 1 && docSize.height >= 1) {
     clip.x = Math.min(clip.x, Math.max(0, docSize.width - 1));
@@ -738,7 +738,7 @@ export async function captureSnippet(snippet, settings, hooks = {}) {
   if (!/^https?:\/\//i.test(snippet.url)) {
     return {
       status: "error",
-      lastError: "URL invalide : seuls http(s) sont supportés.",
+      lastError: "Invalid URL: only http(s) is supported.",
       lastDurationMs: Date.now() - startedAt,
       windowId,
     };
@@ -780,7 +780,7 @@ export async function captureSnippet(snippet, settings, hooks = {}) {
     const load = onceEvent(tabId, "Page.loadEventFired");
     try {
       const nav = await send(tabId, "Page.navigate", { url: snippet.url });
-      if (nav && nav.errorText) throw new Error(`Navigation échouée : ${nav.errorText}`);
+      if (nav && nav.errorText) throw new Error(`Navigation failed: ${nav.errorText}`);
       try {
         await withTimeout(load.promise, LOAD_TIMEOUT_MS, "Page.loadEventFired");
       } catch (_) {
@@ -811,7 +811,7 @@ export async function captureSnippet(snippet, settings, hooks = {}) {
       if (!found) {
         return {
           status: "error",
-          lastError: `Sélecteur d'attente jamais apparu (${selectorTimeoutMs} ms) : ${snippet.waitForSelector}`,
+          lastError: `Wait selector never appeared (${selectorTimeoutMs} ms): ${snippet.waitForSelector}`,
           lastDurationMs: Date.now() - startedAt,
           windowId,
         };
@@ -855,8 +855,8 @@ export async function captureSnippet(snippet, settings, hooks = {}) {
         status: "session_expired",
         finalUrl: typeof finalUrl === "string" ? finalUrl : undefined,
         lastError: urlLooksLikeLogin
-          ? `Redirigé vers une page de connexion : ${finalUrl}`
-          : `Marqueur de session expirée détecté : ${snippet.expiredSelector}`,
+          ? `Redirected to a sign-in page: ${finalUrl}`
+          : `Session-expired marker found: ${snippet.expiredSelector}`,
         lastDurationMs: Date.now() - startedAt,
         windowId,
       };
@@ -896,7 +896,7 @@ export async function captureSnippet(snippet, settings, hooks = {}) {
       await evaluate(tabId, AWAIT_FRAME_JS, {
         awaitPromise: true,
         timeoutMs: 5000,
-        label: "frame après agrandissement du viewport",
+        label: "frame after viewport extension",
       }).catch(() => {});
       await sleep(300);
       // La mise en page a pu bouger : on remesure avant de capturer.
@@ -917,7 +917,7 @@ export async function captureSnippet(snippet, settings, hooks = {}) {
         30000,
         "Page.captureScreenshot"
       );
-      if (!shot || !shot.data) throw new Error("Capture vide renvoyée par le navigateur");
+      if (!shot || !shot.data) throw new Error("Browser returned an empty capture");
       return base64ToBlob(shot.data, "image/webp");
     };
 
@@ -934,7 +934,7 @@ export async function captureSnippet(snippet, settings, hooks = {}) {
     }
     if (analysis && analysis.blank) {
       blankSuspected = true;
-      warnings.push("Rendu probablement vide (page en arrière-plan ?)");
+      warnings.push("Probably blank render (background page?)");
     }
 
     const capturedAt = Date.now();

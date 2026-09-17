@@ -5,9 +5,18 @@ export const KEY_SNIPPETS = "snippets";
 export const KEY_SETTINGS = "settings";
 export const KEY_META = "meta";
 
-// Grille de la page Nouvel Onglet : 12 colonnes, cellules carrées.
-export const GRID_COLUMNS = 12;
-export const GRID_GAP = 12;
+// Disposition libre de la page Nouvel Onglet. Les layouts sont exprimés en
+// pixels dans une largeur de référence (LAYOUT_REF_WIDTH) et mis à l'échelle
+// selon la largeur réelle de la fenêtre : l'arrangement reste proportionnel.
+// La hauteur n'est jamais stockée : elle découle du ratio du screenshot.
+export const LAYOUT_REF_WIDTH = 1200;
+export const LAYOUT_GAP = 12;
+export const LAYOUT_MIN_WIDTH = 140;
+export const LAYOUT_DEFAULT_WIDTH = 380;
+
+// Ancienne grille 12 colonnes (v0.2) : conservée pour migrer les layouts.
+const LEGACY_COLUMNS = 12;
+const LEGACY_CELL = (LAYOUT_REF_WIDTH - LAYOUT_GAP * (LEGACY_COLUMNS - 1)) / LEGACY_COLUMNS;
 
 export const DEFAULT_SETTINGS = {
   viewportWidth: 1280,
@@ -49,14 +58,26 @@ function num(value, fallback, min, max) {
   return Math.min(max, Math.max(min, n));
 }
 
-/** Normalise un `layout` de grille, ou renvoie null s'il est absent/invalide. */
+/**
+ * Normalise un `layout` libre `{x, y, w}` (pixels de référence), migre l'ancien
+ * format de grille `{col, row, w, h}`, ou renvoie null s'il est absent/invalide.
+ */
 function normalizeLayout(raw) {
   if (!raw || typeof raw !== "object") return null;
-  const w = Math.round(num(raw.w, 4, 2, GRID_COLUMNS));
-  const h = Math.round(num(raw.h, 3, 1, 40));
-  const col = Math.round(num(raw.col, 0, 0, GRID_COLUMNS - w));
-  const row = Math.round(num(raw.row, 0, 0, 10000));
-  return { col, row, w, h };
+  if ("col" in raw && !("x" in raw)) {
+    const cols = Math.round(num(raw.w, 4, 2, LEGACY_COLUMNS));
+    const col = Math.round(num(raw.col, 0, 0, LEGACY_COLUMNS - cols));
+    const row = Math.round(num(raw.row, 0, 0, 10000));
+    return {
+      x: Math.round(col * (LEGACY_CELL + LAYOUT_GAP)),
+      y: Math.round(row * (LEGACY_CELL + LAYOUT_GAP)),
+      w: Math.round(cols * LEGACY_CELL + (cols - 1) * LAYOUT_GAP),
+    };
+  }
+  const w = Math.round(num(raw.w, LAYOUT_DEFAULT_WIDTH, LAYOUT_MIN_WIDTH, LAYOUT_REF_WIDTH));
+  const x = Math.round(num(raw.x, 0, 0, LAYOUT_REF_WIDTH - w));
+  const y = Math.round(num(raw.y, 0, 0, 100000));
+  return { x, y, w };
 }
 
 /** Complète un snippet partiel avec les défauts et borne les valeurs numériques. */
@@ -67,7 +88,7 @@ export function normalizeSnippet(raw) {
   const offset = s.offset || DEFAULT_SNIPPET.offset;
   return {
     id: s.id || crypto.randomUUID(),
-    name: String(s.name || "").trim() || String(s.url || "Sans titre"),
+    name: String(s.name || "").trim() || String(s.url || "Untitled"),
     url: String(s.url || "").trim(),
     enabled: s.enabled !== false,
     mode,
@@ -191,46 +212,54 @@ export function isStale(snippet, metaEntry, now = Date.now()) {
   return now - capturedAt >= snippet.intervalMinutes * 60000;
 }
 
-/* --------------------------- placement en grille --------------------------- */
+/* ---------------------------- placement libre ---------------------------- */
 
-function overlaps(a, b) {
-  return (
-    a.col < b.col + b.w && b.col < a.col + a.w && a.row < b.row + b.h && b.row < a.row + a.h
-  );
+/** Ratio hauteur/largeur d'une image capturée (4:3 par défaut). */
+export function aspectOf(image) {
+  const iw = image && image.width ? image.width : 0;
+  const ih = image && image.height ? image.height : 0;
+  if (!iw || !ih) return 0.75;
+  return Math.min(4, Math.max(0.15, ih / iw));
 }
 
-/** true si `layout` ne chevauche aucun des `taken` (bornes de grille incluses). */
-export function fitsInGrid(layout, taken) {
-  if (!layout) return false;
-  if (layout.col < 0 || layout.row < 0 || layout.w < 2 || layout.h < 1) return false;
-  if (layout.col + layout.w > GRID_COLUMNS) return false;
-  return !taken.some((other) => overlaps(layout, other));
+/** Boîte `{x, y, w, h}` d'un layout pour un ratio donné. */
+export function boxOf(layout, aspect) {
+  return { x: layout.x, y: layout.y, w: layout.w, h: Math.round(layout.w * aspect) };
+}
+
+function overlaps(a, b, gap = 0) {
+  return a.x < b.x + b.w + gap && b.x < a.x + a.w + gap && a.y < b.y + b.h + gap && b.y < a.y + a.h + gap;
+}
+
+/** true si `box` ne chevauche aucune des `taken` (boîtes `{x,y,w,h}`) et reste dans la largeur. */
+export function fitsFree(box, taken) {
+  if (!box || box.x < 0 || box.y < 0 || box.w < LAYOUT_MIN_WIDTH) return false;
+  if (box.x + box.w > LAYOUT_REF_WIDTH) return false;
+  return !taken.some((other) => overlaps(box, other));
 }
 
 /**
- * Première position libre, balayage ligne par ligne puis colonne par colonne
- * (« first fit »). Renvoie toujours un layout : la grille est verticalement
- * infinie, donc on finit forcément par trouver une ligne vide.
+ * Première position libre pour une boîte `w × h` : on balaie les candidats
+ * (0,0) puis les coins droits/bas des boîtes existantes, du plus haut au plus
+ * bas. Renvoie toujours un layout : en dernier recours, sous tout le reste.
  */
-export function findFreeSlot(w, h, taken) {
-  const width = Math.min(GRID_COLUMNS, Math.max(2, Math.round(w)));
-  const height = Math.max(1, Math.round(h));
-  const maxRow = taken.reduce((acc, l) => Math.max(acc, l.row + l.h), 0);
-  for (let row = 0; row <= maxRow; row += 1) {
-    for (let col = 0; col <= GRID_COLUMNS - width; col += 1) {
-      const candidate = { col, row, w: width, h: height };
-      if (fitsInGrid(candidate, taken)) return candidate;
-    }
+export function findFreeSpot(w, h, taken) {
+  const width = Math.min(LAYOUT_REF_WIDTH, Math.max(LAYOUT_MIN_WIDTH, Math.round(w)));
+  const xs = new Set([0]);
+  const ys = new Set([0]);
+  for (const b of taken) {
+    xs.add(b.x + b.w + LAYOUT_GAP);
+    xs.add(b.x);
+    ys.add(b.y + b.h + LAYOUT_GAP);
+    ys.add(b.y);
   }
-  return { col: 0, row: maxRow, w: width, h: height };
-}
-
-/** Taille de carte déduite du ratio de l'image : 4 colonnes de large, hauteur bornée. */
-export function layoutSizeForImage(image) {
-  const w = 4;
-  const iw = image && image.width ? image.width : 0;
-  const ih = image && image.height ? image.height : 0;
-  if (!iw || !ih) return { w, h: 3 };
-  const h = Math.round((w * ih) / iw);
-  return { w, h: Math.min(8, Math.max(2, h)) };
+  const candidates = [];
+  for (const y of ys) for (const x of xs) candidates.push({ x, y, w: width, h });
+  candidates.sort((a, b) => a.y - b.y || a.x - b.x);
+  for (const c of candidates) {
+    if (c.x + c.w > LAYOUT_REF_WIDTH) continue;
+    if (!taken.some((other) => overlaps(c, other, LAYOUT_GAP))) return { x: c.x, y: c.y, w: width };
+  }
+  const bottom = taken.reduce((acc, b) => Math.max(acc, b.y + b.h + LAYOUT_GAP), 0);
+  return { x: 0, y: bottom, w: width };
 }

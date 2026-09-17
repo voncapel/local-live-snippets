@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Local Live Snippets",
-  "version": "0.2.1",
-  "description": "Captures périodiques de zones de pages web (dashboards, flux) affichées sur la page Nouvel Onglet. 100 % local, réutilise vos sessions.",
+  "version": "0.3.0",
+  "description": "Periodic captures of web page zones (dashboards, feeds) shown on your New Tab page. 100% local, reuses your sessions.",
   "permissions": [
     "alarms",
     "storage",
