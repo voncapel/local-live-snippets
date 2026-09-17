@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="fr">
+  <head>
+    <meta charset="utf-8" />
+    <title>Local Live Snippets — Paramètres</title>
+    <link rel="stylesheet" href="options.css" />
+  </head>
+  <body>
+    <div class="wrap">
+      <header>
+        <h1>Local Live Snippets</h1>
+        <p class="sub">
+          Captures périodiques de zones de pages, affichées sur votre page Nouvel Onglet.
+          Tout reste local à ce profil Chrome.
+        </p>
+      </header>
+
+      <section class="panel">
+        <div class="panel-head">
+          <h2>Snippets</h2>
+          <div class="row-actions">
+            <button id="capture-all" type="button" class="btn">Tout capturer</button>
+            <button id="new-snippet" type="button" class="btn btn-primary">Nouveau snippet</button>
+          </div>
+        </div>
+        <ul id="snippet-list" class="snippet-list"></ul>
+        <p id="snippet-empty" class="muted" hidden>Aucun snippet. Commencez par « Nouveau snippet ».</p>
+      </section>
+
+      <section class="panel" id="form-panel" hidden>
+        <div class="panel-head">
+          <h2 id="form-title">Nouveau snippet</h2>
+        </div>
+
+        <form id="snippet-form" autocomplete="off">
+          <input type="hidden" id="f-id" />
+
+          <div class="field">
+            <label for="f-name">Nom</label>
+            <input type="text" id="f-name" placeholder="Dashboard ventes" />
+          </div>
+
+          <div class="field">
+            <label for="f-url">URL <span class="req">*</span></label>
+            <input type="url" id="f-url" placeholder="https://exemple.com/dashboard" required />
+            <p class="hint">Doit commencer par http:// ou https://. La session du profil est réutilisée.</p>
+          </div>
+
+          <fieldset class="field">
+            <legend>Zone à capturer</legend>
+            <label class="radio">
+              <input type="radio" name="mode" value="anchor" /> Zone dessinée (recommandé)
+            </label>
+            <label class="radio">
+              <input type="radio" name="mode" value="selector" /> Sélecteur CSS
+            </label>
+            <label class="radio"><input type="radio" name="mode" value="rect" /> Rectangle (px)</label>
+            <label class="radio">
+              <input type="radio" name="mode" value="viewport" /> Viewport entier
+            </label>
+          </fieldset>
+
+          <div class="field mode-block" data-mode="anchor">
+            <label for="f-anchor">Ancre détectée</label>
+            <div class="inline">
+              <input type="text" id="f-anchor" readonly />
+              <button id="pick-zone" type="button" class="btn">Redéfinir la zone</button>
+            </div>
+            <p class="hint" id="pick-hint">
+              Ouvre l'URL dans un onglet : dessinez un rectangle, Entrée valide, Échap annule.
+            </p>
+            <p class="hint" id="anchor-offset"></p>
+          </div>
+
+          <div class="field mode-block" data-mode="selector">
+            <label for="f-selector">Sélecteur CSS <span class="req">*</span></label>
+            <input type="text" id="f-selector" placeholder="#main .stats-card" />
+          </div>
+
+          <div class="field mode-block" data-mode="rect">
+            <label>Rectangle (coordonnées de page, viewport de référence 1280&nbsp;px)</label>
+            <div class="grid4">
+              <label class="tiny">x<input type="number" id="f-rect-x" value="0" min="0" step="1" /></label>
+              <label class="tiny">y<input type="number" id="f-rect-y" value="0" min="0" step="1" /></label>
+              <label class="tiny">
+                largeur<input type="number" id="f-rect-w" value="800" min="1" step="1" />
+              </label>
+              <label class="tiny">
+                hauteur<input type="number" id="f-rect-h" value="600" min="1" step="1" />
+              </label>
+            </div>
+          </div>
+
+          <div class="field">
+            <label for="f-wait">Attendre ce sélecteur avant capture (optionnel)</label>
+            <input type="text" id="f-wait" placeholder=".chart-loaded" />
+          </div>
+
+          <div class="field">
+            <label for="f-expired">Sélecteur « session expirée » (optionnel)</label>
+            <input type="text" id="f-expired" placeholder="form.login, #login-password" />
+            <p class="hint">S'il est présent, la dernière bonne image est conservée.</p>
+          </div>
+
+          <div class="grid3">
+            <div class="field">
+              <label for="f-delay">Délai après chargement (ms)</label>
+              <input type="number" id="f-delay" value="1500" min="0" max="60000" step="100" />
+            </div>
+            <div class="field">
+              <label for="f-interval">Intervalle (minutes)</label>
+              <input type="number" id="f-interval" value="15" min="1" max="1440" step="1" />
+            </div>
+            <div class="field">
+              <label for="f-vw">Largeur de viewport de capture</label>
+              <input type="number" id="f-vw" value="0" min="0" max="3840" step="10" />
+              <p class="hint">0 = réglage global.</p>
+            </div>
+          </div>
+
+          <label class="check"><input type="checkbox" id="f-freeze" checked /> Geler animations et transitions</label>
+          <label class="check">
+            <input type="checkbox" id="f-scroll-prime" checked />
+            Pré-scroller la page pour charger les images différées
+          </label>
+          <p class="hint">
+            À décocher sur les flux infinis qui rechargent leur contenu quand on les parcourt.
+          </p>
+          <label class="check"><input type="checkbox" id="f-enabled" checked /> Activé</label>
+
+          <p id="form-error" class="error" hidden></p>
+
+          <div class="row-actions">
+            <button type="submit" class="btn btn-primary">Enregistrer</button>
+            <button id="form-cancel" type="button" class="btn btn-ghost">Annuler</button>
+          </div>
+        </form>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head"><h2>Réglages globaux</h2></div>
+        <div class="grid4">
+          <div class="field">
+            <label for="s-vw">Largeur viewport</label>
+            <input type="number" id="s-vw" min="320" max="3840" step="10" />
+          </div>
+          <div class="field">
+            <label for="s-vh">Hauteur viewport</label>
+            <input type="number" id="s-vh" min="240" max="4320" step="10" />
+          </div>
+          <div class="field">
+            <label for="s-tick">Tick global (min)</label>
+            <input type="number" id="s-tick" min="1" max="1440" step="1" />
+          </div>
+        </div>
+        <div class="grid3">
+          <div class="field">
+            <label for="s-wait-timeout">Timeout d'attente de sélecteur (ms)</label>
+            <input type="number" id="s-wait-timeout" min="1000" max="120000" step="500" />
+          </div>
+          <div class="field">
+            <label for="s-images-timeout">Timeout de chargement des images (ms)</label>
+            <input type="number" id="s-images-timeout" min="0" max="60000" step="500" />
+            <p class="hint">Attente maximale des images de la zone ciblée. 0 = ne pas attendre.</p>
+          </div>
+        </div>
+        <label class="check">
+          <input type="checkbox" id="s-capture-window" />
+          Utiliser une fenêtre de capture dédiée (recommandé si captures noires)
+        </label>
+        <p class="hint">
+          Une petite fenêtre popup non focalisée sert de surface de rendu : son onglet est actif,
+          donc réellement « visible » pour Chrome. Elle apparaît brièvement derrière la fenêtre
+          courante et se referme dès que la file de capture est vide.
+        </p>
+        <div class="row-actions">
+          <button id="save-settings" type="button" class="btn btn-primary">Enregistrer les réglages</button>
+          <span id="settings-saved" class="muted" hidden>Enregistré.</span>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head"><h2>Maintenance</h2></div>
+        <div class="row-actions">
+          <button id="export-config" type="button" class="btn">Exporter la config (JSON)</button>
+          <button id="import-config" type="button" class="btn">Importer une config</button>
+          <button id="clear-images" type="button" class="btn btn-danger">Vider toutes les images</button>
+        </div>
+        <input type="file" id="import-file" accept="application/json,.json" hidden />
+        <p id="maintenance-msg" class="muted" hidden></p>
+      </section>
+    </div>
+
+    <script type="module" src="options.js"></script>
+  </body>
+</html>

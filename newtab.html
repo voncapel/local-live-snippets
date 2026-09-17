@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="fr">
+  <head>
+    <meta charset="utf-8" />
+    <title>Nouvel onglet</title>
+    <link rel="stylesheet" href="newtab.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="topbar-left">
+        <h1>Local Live Snippets</h1>
+        <span id="clock" class="clock"></span>
+      </div>
+      <div class="topbar-right">
+        <span id="run-status" class="run-status" hidden></span>
+        <button id="refresh-all" type="button" class="btn">Tout rafraîchir</button>
+        <button id="open-options" type="button" class="btn btn-ghost">Paramètres</button>
+      </div>
+    </header>
+
+    <main>
+      <section id="empty" class="empty" hidden>
+        <h2>Aucun snippet pour l'instant</h2>
+        <p>
+          Ouvrez la page qui vous intéresse, cliquez sur l'icône de l'extension puis sur
+          «&nbsp;Capturer une zone de cette page&nbsp;» et dessinez un rectangle&nbsp;: la zone sera
+          capturée périodiquement et affichée ici.
+        </p>
+        <button id="empty-cta" type="button" class="btn">Ouvrir les paramètres</button>
+      </section>
+
+      <div id="grid" class="grid">
+        <div id="ghost" class="ghost" hidden></div>
+      </div>
+    </main>
+
+    <script type="module" src="newtab.js"></script>
+  </body>
+</html>

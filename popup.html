@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="fr">
+  <head>
+    <meta charset="utf-8" />
+    <title>Local Live Snippets</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <header>
+      <strong>Local Live Snippets</strong>
+      <span id="count" class="muted"></span>
+    </header>
+
+    <div class="hero">
+      <button id="pick-zone" type="button" class="btn btn-primary btn-hero">
+        Capturer une zone de cette page
+      </button>
+      <p id="pick-error" class="pick-error" hidden></p>
+    </div>
+
+    <ul id="list"></ul>
+    <p id="empty" class="muted" hidden>Aucun snippet configuré.</p>
+
+    <footer>
+      <button id="capture-all" type="button" class="btn btn-primary">Tout capturer</button>
+      <button id="open-options" type="button" class="btn">Paramètres</button>
+    </footer>
+
+    <script type="module" src="popup.js"></script>
+  </body>
+</html>
