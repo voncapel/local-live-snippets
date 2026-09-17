@@ -5,18 +5,14 @@ export const KEY_SNIPPETS = "snippets";
 export const KEY_SETTINGS = "settings";
 export const KEY_META = "meta";
 
-// Disposition libre de la page Nouvel Onglet. Les layouts sont exprimés en
-// pixels dans une largeur de référence (LAYOUT_REF_WIDTH) et mis à l'échelle
-// selon la largeur réelle de la fenêtre : l'arrangement reste proportionnel.
-// La hauteur n'est jamais stockée : elle découle du ratio du screenshot.
-export const LAYOUT_REF_WIDTH = 1200;
-export const LAYOUT_GAP = 12;
-export const LAYOUT_MIN_WIDTH = 140;
+// Disposition libre de la page Nouvel Onglet.
+// Les layouts sont stockés en pixels réels { x, y, w }.
+// La hauteur n'est jamais stockée : elle découle du ratio du screenshot pour
+// garantir une homothétie stricte.
+export const LAYOUT_GAP = 14;
+export const LAYOUT_MIN_WIDTH = 180;
 export const LAYOUT_DEFAULT_WIDTH = 380;
-
-// Ancienne grille 12 colonnes (v0.2) : conservée pour migrer les layouts.
-const LEGACY_COLUMNS = 12;
-const LEGACY_CELL = (LAYOUT_REF_WIDTH - LAYOUT_GAP * (LEGACY_COLUMNS - 1)) / LEGACY_COLUMNS;
+export const LAYOUT_MAX_WIDTH = 840;
 
 export const DEFAULT_SETTINGS = {
   viewportWidth: 1280,
@@ -59,24 +55,38 @@ function num(value, fallback, min, max) {
 }
 
 /**
- * Normalise un `layout` libre `{x, y, w}` (pixels de référence), migre l'ancien
- * format de grille `{col, row, w, h}`, ou renvoie null s'il est absent/invalide.
+ * Normalise un `layout` libre `{x, y, w}` en pixels réels, migre l'ancien
+ * format de grille v0.2 `{col, row, w, h}`, et assainit les largeurs aberrantes.
  */
 function normalizeLayout(raw) {
   if (!raw || typeof raw !== "object") return null;
+
+  // 1) Migration format de grille v0.2 : { col, row, w, h }
   if ("col" in raw && !("x" in raw)) {
-    const cols = Math.round(num(raw.w, 4, 2, LEGACY_COLUMNS));
-    const col = Math.round(num(raw.col, 0, 0, LEGACY_COLUMNS - cols));
-    const row = Math.round(num(raw.row, 0, 0, 10000));
+    const cols = Math.round(num(raw.w, 4, 2, 12));
+    const col = Math.round(num(raw.col, 0, 0, 12));
+    const row = Math.round(num(raw.row, 0, 0, 1000));
+    // w: 4 colonnes -> 380px, 12 colonnes -> 560px
+    const w = Math.min(560, Math.max(260, Math.round(cols * 70) + 100));
     return {
-      x: Math.round(col * (LEGACY_CELL + LAYOUT_GAP)),
-      y: Math.round(row * (LEGACY_CELL + LAYOUT_GAP)),
-      w: Math.round(cols * LEGACY_CELL + (cols - 1) * LAYOUT_GAP),
+      x: Math.round(col * 70),
+      y: Math.round(row * 70),
+      w,
     };
   }
-  const w = Math.round(num(raw.w, LAYOUT_DEFAULT_WIDTH, LAYOUT_MIN_WIDTH, LAYOUT_REF_WIDTH));
-  const x = Math.round(num(raw.x, 0, 0, LAYOUT_REF_WIDTH - w));
-  const y = Math.round(num(raw.y, 0, 0, 100000));
+
+  // 2) Layout libre { x, y, w } :
+  // Si raw.w est disproportionné (ex: bug 1200px / 2500px issu de l'ancienne échelle),
+  // on le réinitialise à la taille par défaut pour débloquer immédiatement l'affichage.
+  let w = Number(raw.w);
+  if (!Number.isFinite(w) || w <= 0 || w >= 950) {
+    w = LAYOUT_DEFAULT_WIDTH;
+  } else {
+    w = Math.min(LAYOUT_MAX_WIDTH, Math.max(LAYOUT_MIN_WIDTH, Math.round(w)));
+  }
+
+  const x = Math.max(0, Math.round(num(raw.x, 0, 0, 100000)));
+  const y = Math.max(0, Math.round(num(raw.y, 0, 0, 100000)));
   return { x, y, w };
 }
 
@@ -231,20 +241,20 @@ function overlaps(a, b, gap = 0) {
   return a.x < b.x + b.w + gap && b.x < a.x + a.w + gap && a.y < b.y + b.h + gap && b.y < a.y + a.h + gap;
 }
 
-/** true si `box` ne chevauche aucune des `taken` (boîtes `{x,y,w,h}`) et reste dans la largeur. */
-export function fitsFree(box, taken) {
+/** true si `box` ne chevauche aucune des `taken` (boîtes `{x,y,w,h}`). */
+export function fitsFree(box, taken = []) {
   if (!box || box.x < 0 || box.y < 0 || box.w < LAYOUT_MIN_WIDTH) return false;
-  if (box.x + box.w > LAYOUT_REF_WIDTH) return false;
   return !taken.some((other) => overlaps(box, other));
 }
 
 /**
- * Première position libre pour une boîte `w × h` : on balaie les candidats
- * (0,0) puis les coins droits/bas des boîtes existantes, du plus haut au plus
- * bas. Renvoie toujours un layout : en dernier recours, sous tout le reste.
+ * Première position libre pour une boîte `w × h` : balayage des coins libres
+ * en respectant la largeur maximale du plateau.
  */
-export function findFreeSpot(w, h, taken) {
-  const width = Math.min(LAYOUT_REF_WIDTH, Math.max(LAYOUT_MIN_WIDTH, Math.round(w)));
+export function findFreeSpot(w, h, taken = [], maxWidth = 1600) {
+  const width = Math.min(LAYOUT_MAX_WIDTH, Math.max(LAYOUT_MIN_WIDTH, Math.round(w || LAYOUT_DEFAULT_WIDTH)));
+  const height = Math.max(80, Math.round(h || width * 0.75));
+  const maxW = Math.max(width + 40, maxWidth);
   const xs = new Set([0]);
   const ys = new Set([0]);
   for (const b of taken) {
@@ -254,12 +264,19 @@ export function findFreeSpot(w, h, taken) {
     ys.add(b.y);
   }
   const candidates = [];
-  for (const y of ys) for (const x of xs) candidates.push({ x, y, w: width, h });
+  for (const y of ys) {
+    for (const x of xs) {
+      candidates.push({ x, y, w: width, h: height });
+    }
+  }
   candidates.sort((a, b) => a.y - b.y || a.x - b.x);
   for (const c of candidates) {
-    if (c.x + c.w > LAYOUT_REF_WIDTH) continue;
+    if (c.x + c.w > maxW) continue;
     if (!taken.some((other) => overlaps(c, other, LAYOUT_GAP))) return { x: c.x, y: c.y, w: width };
   }
   const bottom = taken.reduce((acc, b) => Math.max(acc, b.y + b.h + LAYOUT_GAP), 0);
   return { x: 0, y: bottom, w: width };
 }
+
+// Alias pour compatibilité
+export const findFreeSlot = findFreeSpot;

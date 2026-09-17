@@ -4,7 +4,8 @@
 
 import { captureSnippet, closeCaptureWindow, teardownCaptureTab } from "./capture.js";
 import {
-  findFreeSlot,
+  LAYOUT_DEFAULT_WIDTH,
+  findFreeSpot,
   getMeta,
   getSettings,
   getSnippet,
@@ -279,14 +280,16 @@ async function startPicker(url, snippetId) {
   return tab.id;
 }
 
-/** Place un nouveau snippet dans la première case libre de la grille. */
+/** Place un nouveau snippet dans la première case libre du plateau. */
 async function initialLayout(rect) {
   const snippets = await getSnippets();
   const taken = snippets.map((s) => s.layout).filter(Boolean);
-  const w = 4;
   const ratio = rect && rect.width ? rect.height / rect.width : 0.75;
-  const h = Math.min(8, Math.max(2, Math.round(w * ratio)));
-  return findFreeSlot(w, h, taken);
+  const w = rect && rect.width
+    ? Math.min(500, Math.max(340, Math.round(rect.width)))
+    : LAYOUT_DEFAULT_WIDTH;
+  const h = Math.round(w * ratio);
+  return findFreeSpot(w, h, taken);
 }
 
 /** Crée (ou met à jour) un snippet depuis le résultat du picker. */

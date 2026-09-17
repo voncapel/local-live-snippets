@@ -8,13 +8,12 @@ import { deleteImage, getAllImages, getImage } from "./db.js";
 import {
   LAYOUT_DEFAULT_WIDTH,
   LAYOUT_GAP,
+  LAYOUT_MAX_WIDTH,
   LAYOUT_MIN_WIDTH,
-  LAYOUT_REF_WIDTH,
   aspectOf,
   boxOf,
   deleteSnippet,
   findFreeSpot,
-  fitsFree,
   getMeta,
   getSnippets,
   upsertSnippet,
@@ -95,16 +94,6 @@ async function captureNow(snippetId) {
 
 /* ------------------------------ géométrie ------------------------------ */
 
-/** Facteur pixels de référence -> pixels écran. */
-function scale() {
-  return (board.clientWidth || LAYOUT_REF_WIDTH) / LAYOUT_REF_WIDTH;
-}
-
-function boxToScreen(box) {
-  const k = scale();
-  return { left: box.x * k, top: box.y * k, width: box.w * k, height: box.h * k };
-}
-
 function entryBox(entry) {
   return boxOf(entry.snippet.layout, entry.aspect);
 }
@@ -119,16 +108,16 @@ function takenBoxes(exceptId) {
   return out;
 }
 
-function placeCard(entry, px) {
-  entry.card.style.left = `${px.left}px`;
-  entry.card.style.top = `${px.top}px`;
-  entry.card.style.width = `${px.width}px`;
-  entry.card.style.height = `${px.height}px`;
+function placeCard(entry, box) {
+  entry.card.style.left = `${Math.round(box.x)}px`;
+  entry.card.style.top = `${Math.round(box.y)}px`;
+  entry.card.style.width = `${Math.round(box.w)}px`;
+  entry.card.style.height = `${Math.round(box.h)}px`;
 }
 
 function applyLayout(entry) {
   if (!entry.snippet.layout) return;
-  placeCard(entry, boxToScreen(entryBox(entry)));
+  placeCard(entry, entryBox(entry));
 }
 
 function updateBoardHeight() {
@@ -138,7 +127,7 @@ function updateBoardHeight() {
     const b = entryBox(entry);
     bottom = Math.max(bottom, b.y + b.h);
   }
-  board.style.height = `${Math.ceil(bottom * scale())}px`;
+  board.style.height = `${Math.ceil(bottom + 48)}px`;
 }
 
 function applyAllLayouts() {
@@ -150,11 +139,12 @@ function applyAllLayouts() {
 async function assignMissingLayouts(images) {
   const taken = snippets.filter((s) => s.layout).map((s) => boxOf(s.layout, aspectOf(images.get(s.id))));
   const toSave = [];
+  const maxW = board.clientWidth || 1400;
   for (const snippet of snippets) {
     if (snippet.layout) continue;
     const aspect = aspectOf(images.get(snippet.id));
     const w = LAYOUT_DEFAULT_WIDTH;
-    snippet.layout = findFreeSpot(w, Math.round(w * aspect), taken);
+    snippet.layout = findFreeSpot(w, Math.round(w * aspect), taken, maxW);
     taken.push(boxOf(snippet.layout, aspect));
     toSave.push(snippet);
   }
@@ -166,13 +156,14 @@ async function assignMissingLayouts(images) {
 /* ------------------------------- snapping ------------------------------- */
 
 /**
- * Snappe une boîte (pixels de référence) sur les bords des autres boîtes et
+ * Snappe une boîte (pixels réels) sur les bords des autres boîtes et
  * du plateau. `mode` = "move" (x et y libres) ou "resize" (coin bas-droit).
- * Renvoie la boîte ajustée et les guides à afficher (en pixels de référence).
+ * Renvoie la boîte ajustée et les coordonnées des guides (ou null).
  */
 function snapBox(box, taken, mode) {
-  const tol = SNAP_PX / scale();
-  const xTargets = [0, LAYOUT_REF_WIDTH];
+  const tol = SNAP_PX;
+  const boardWidth = board.clientWidth || 1600;
+  const xTargets = [0, boardWidth];
   const yTargets = [0];
   for (const b of taken) {
     xTargets.push(b.x, b.x + b.w, b.x + b.w + LAYOUT_GAP, b.x - LAYOUT_GAP);
@@ -228,11 +219,10 @@ function snapBox(box, taken, mode) {
 }
 
 function showGuides(gx, gy) {
-  const k = scale();
   guideX.hidden = gx === null;
   guideY.hidden = gy === null;
-  if (gx !== null) guideX.style.left = `${gx * k}px`;
-  if (gy !== null) guideY.style.top = `${gy * k}px`;
+  if (gx !== null) guideX.style.left = `${Math.round(gx)}px`;
+  if (gy !== null) guideY.style.top = `${Math.round(gy)}px`;
 }
 
 function hideGuides() {
@@ -476,11 +466,10 @@ function beginInteraction(entry, kind, event) {
 
 function onPointerMove(event) {
   if (!interacting || event.pointerId !== interacting.pointerId) return;
-  const k = scale();
-  const dx = (event.clientX - interacting.startX) / k;
-  const dy = (event.clientY - interacting.startY) / k;
+  const dx = event.clientX - interacting.startX;
+  const dy = event.clientY - interacting.startY;
   if (!interacting.moved) {
-    if (Math.abs(dx) + Math.abs(dy) < MOVE_THRESHOLD / k) return;
+    if (Math.abs(dx) + Math.abs(dy) < MOVE_THRESHOLD) return;
     interacting.moved = true;
     interacting.entry.card.classList.add(interacting.kind === "move" ? "dragging" : "resizing");
   }
@@ -489,27 +478,24 @@ function onPointerMove(event) {
   const aspect = entry.aspect;
   let box;
   if (kind === "move") {
-    box = { ...startBox, x: startBox.x + dx, y: Math.max(0, startBox.y + dy) };
+    box = { ...startBox, x: Math.max(0, startBox.x + dx), y: Math.max(0, startBox.y + dy) };
   } else {
     // Homothétique : la largeur suit la souris (le plus grand des deux axes).
-    const w = Math.max(LAYOUT_MIN_WIDTH, Math.max(startBox.w + dx, (startBox.h + dy) / aspect));
-    box = { ...startBox, w, h: w * aspect };
+    const w = Math.min(
+      LAYOUT_MAX_WIDTH,
+      Math.max(LAYOUT_MIN_WIDTH, Math.max(startBox.w + dx, (startBox.h + dy) / aspect))
+    );
+    box = { ...startBox, w, h: Math.round(w * aspect) };
   }
 
   const taken = takenBoxes(entry.snippet.id);
   const snapped = snapBox(box, taken, kind);
   let final = snapped.box;
-  final.x = Math.min(LAYOUT_REF_WIDTH - final.w, Math.max(0, final.x));
-  if (kind === "resize" && final.x + final.w > LAYOUT_REF_WIDTH) {
-    final.w = LAYOUT_REF_WIDTH - final.x;
-    final.h = final.w * aspect;
-  }
+  final.x = Math.max(0, final.x);
   final = { x: Math.round(final.x), y: Math.round(final.y), w: Math.round(final.w), h: Math.round(final.w * aspect) };
 
   interacting.result = final;
-  const ok = fitsFree(final, taken);
-  entry.card.classList.toggle("blocked", !ok);
-  placeCard(entry, boxToScreen(final));
+  placeCard(entry, final);
   showGuides(snapped.guideX, snapped.guideY);
 }
 
@@ -518,7 +504,7 @@ async function onPointerUp(event) {
   const { entry, moved, result } = interacting;
   interacting = null;
   hideGuides();
-  entry.card.classList.remove("dragging", "resizing", "blocked");
+  entry.card.classList.remove("dragging", "resizing");
 
   if (!moved || !result) {
     applyLayout(entry);
@@ -532,17 +518,13 @@ async function onPointerUp(event) {
     entry.suppressClick = false;
   }, 300);
 
-  if (fitsFree(result, takenBoxes(entry.snippet.id))) {
-    entry.snippet = { ...entry.snippet, layout: { x: result.x, y: result.y, w: result.w } };
-    const index = snippets.findIndex((s) => s.id === entry.snippet.id);
-    if (index >= 0) snippets[index] = entry.snippet;
-    applyLayout(entry);
-    updateBoardHeight();
-    await upsertSnippet(entry.snippet).catch((error) => console.warn("[LLS] layout", error));
-  } else {
-    // Chevauchement : on refuse et on remet la carte où elle était.
-    applyLayout(entry);
-  }
+  entry.snippet = { ...entry.snippet, layout: { x: result.x, y: result.y, w: result.w } };
+  const index = snippets.findIndex((s) => s.id === entry.snippet.id);
+  if (index >= 0) snippets[index] = entry.snippet;
+  applyLayout(entry);
+  updateBoardHeight();
+  await upsertSnippet(entry.snippet).catch((error) => console.warn("[LLS] layout", error));
+
   await flushPendingReload();
 }
 
@@ -802,10 +784,10 @@ chrome.storage.onChanged.addListener((changes, area) => {
   }
 });
 
-// L'échelle suit la largeur du plateau.
+// Ajuste la hauteur du plateau si le conteneur change de dimensions.
 new ResizeObserver(() => {
   if (interacting) return;
-  applyAllLayouts();
+  updateBoardHeight();
 }).observe(board);
 
 setInterval(updateAges, 30000);
