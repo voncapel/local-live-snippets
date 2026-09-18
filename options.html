@@ -2,15 +2,20 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <title>Local Live Snippets — Settings</title>
+    <title>Boardmine — Settings</title>
+    <link rel="icon" type="image/svg+xml" href="icons/favicon.svg" />
     <link rel="stylesheet" href="options.css" />
   </head>
   <body>
     <div class="wrap">
       <header>
-        <h1>Local Live Snippets</h1>
+        <div class="brand-header">
+          <img src="assets/picto.svg" class="brand-picto" alt="" width="26" height="34" />
+          <img src="assets/wordmark.svg" class="brand-wordmark" alt="Boardmine" height="24" />
+          <h1 class="sr-only">Boardmine</h1>
+        </div>
         <p class="sub">
-          Periodic captures of page zones, displayed on your New Tab page.
+          Periodic captures of page zones, displayed on your New Tab board.
           Everything stays local to this Chrome profile.
         </p>
       </header>
@@ -23,6 +28,10 @@
             <button id="new-snippet" type="button" class="btn btn-primary">New snippet</button>
           </div>
         </div>
+        <div class="list-filter">
+          <label for="board-filter">Board</label>
+          <select id="board-filter"></select>
+        </div>
         <ul id="snippet-list" class="snippet-list"></ul>
         <p id="snippet-empty" class="muted" hidden>No snippets yet. Start with “New snippet”.</p>
       </section>
@@ -34,6 +43,15 @@
 
         <form id="snippet-form" autocomplete="off">
           <input type="hidden" id="f-id" />
+
+          <div class="field">
+            <label for="f-board">Board</label>
+            <select id="f-board"></select>
+            <p class="hint" id="f-board-hint">
+              Chosen when the snippet is created. Moving a snippet to another board is not
+              supported yet.
+            </p>
+          </div>
 
           <div class="field">
             <label for="f-name">Name</label>
@@ -135,6 +153,20 @@
             <button id="form-cancel" type="button" class="btn btn-ghost">Cancel</button>
           </div>
         </form>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <h2>Boards</h2>
+          <div class="row-actions">
+            <button id="new-board" type="button" class="btn btn-primary">New board</button>
+          </div>
+        </div>
+        <ul id="board-list" class="board-list"></ul>
+        <p class="hint">
+          “Used on New Tab” is the board Chrome shows on every new tab. Deleting a board also
+          deletes its snippets and their images.
+        </p>
       </section>
 
       <section class="panel">

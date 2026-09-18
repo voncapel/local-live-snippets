@@ -1,4 +1,4 @@
-# Local Live Snippets
+# Boardmine
 
 > Turn your Chrome New Tab into an ambient, glanceable dashboard. Clip auto-updating visual widgets from any web page — dashboards, analytics, feeds, or internal tools behind login. 100% local, private, and session-aware.
 
@@ -16,7 +16,7 @@ A private, local reimagining of Arc's **Live Previews** for Google Chrome (Manif
 1. Clone or download this repository.
 2. Navigate to `chrome://extensions`.
 3. Enable **Developer mode** (top-right toggle).
-4. Click **Load unpacked** and select the `local-live-snippets` directory.
+4. Click **Load unpacked** and select the `boardmine` directory.
 5. Open a new tab to see your live board.
 
 ## Use
@@ -36,11 +36,23 @@ On your New Tab page:
 
 The default refresh interval is 15 minutes (customizable per snippet or globally in **Settings**).
 
+## Boards
+
+Snippets are organized into **boards** (e.g. Work, Personal, Finance). Each snippet belongs to exactly one board, chosen in the popup before you capture.
+
+- **Switch boards**: click the board name in the top bar of the New Tab page. The dropdown lists your boards, and lets you create, rename or delete the current one.
+- **Board shown on New Tab**: every new tab always opens the board you pinned with the pin icon in that dropdown — not the last one you looked at.
+- **Open a board in any tab**: every board has a stable URL, `chrome-extension://<id>/newtab.html?board=<boardId>`. Use the **↗** button next to a board name in the popup to open it, then bookmark or pin the tab. Several tabs can show different boards at once.
+- **Refresh all** on a board only refreshes that board; the periodic refresh keeps running for every board.
+- Deleting a board erases its snippets and their captured images. The last remaining board cannot be deleted.
+
+On upgrade from 0.3.x, existing snippets land in a board named **Main**. Config exports are now `version: 3` and include boards; older exports import into **Main**.
+
 ## About the "debugging this browser" bar
 
 Every capture briefly surfaces this indicator for a few seconds:
 
-> *Une extension a commencé à déboguer ce navigateur* / *"Local Live Snippets" started debugging this browser*
+> *Une extension a commencé à déboguer ce navigateur* / *"Boardmine" started debugging this browser*
 
 This is standard Chrome behavior. The extension utilizes `chrome.debugger` (Chrome DevTools Protocol) because it is the only native browser API capable of capturing an accurate, non-visible background tab with custom clips and viewport emulation. Nothing leaves your machine. The notification dismisses automatically once capture completes.
 
@@ -93,10 +105,10 @@ manifest.json   MV3 declaration & permissions
 background.js   Service worker: alarm orchestration, queue, message dispatch
 capture.js      CDP pipeline: visibility spoofing, lazy priming, clip measurement
 picker.js       Interactive selection overlay with 8-point handles & DOM anchor detection
-newtab.*        Ambient New Tab board: free canvas, edge snapping, dark glass styling
+newtab.*        Board page (New Tab and ?board=<id> URLs): free canvas, edge snapping, board switcher
 options.*       Settings interface, snippet editor & JSON configuration backup
 popup.*         Extension action popup: quick status & capture triggers
-storage.js      Persistence schema & geometry math
+storage.js      Persistence schema (boards, snippets, settings, meta) & geometry math
 db.js           IndexedDB blob storage for WebP captures
 ```
 

@@ -2,7 +2,8 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <title>New Tab</title>
+    <title>Boardmine</title>
+    <link rel="icon" type="image/svg+xml" href="icons/favicon.svg" />
     <link rel="stylesheet" href="newtab.css" />
   </head>
   <body>
@@ -11,8 +12,17 @@
 
     <header class="topbar">
       <div class="topbar-left">
-        <span class="brand"><span class="brand-mark"></span>Live Snippets</span>
+        <span class="brand">
+          <img src="assets/picto.svg" class="brand-picto" alt="" width="20" height="26" />
+          <img src="assets/wordmark.svg" class="brand-wordmark" alt="Boardmine" height="20" />
+        </span>
         <span id="clock" class="clock"></span>
+        <div class="board-picker">
+          <button id="board-btn" type="button" class="board-btn" aria-haspopup="true" aria-expanded="false">
+            <span id="board-btn-name" class="board-btn-name">Board</span>
+            <svg class="board-btn-chevron" viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6.5 8 10.5l4-4"/></svg>
+          </button>
+        </div>
       </div>
       <div class="topbar-right">
         <span id="run-status" class="run-status" hidden></span>
@@ -23,10 +33,10 @@
 
     <main>
       <section id="empty" class="empty" hidden>
-        <h2>Nothing here yet</h2>
+        <h2 id="empty-title">Nothing here yet</h2>
         <p>
-          Open any page, click the extension icon, then <strong>Capture a zone</strong> and draw a
-          rectangle. It will be captured periodically and shown here.
+          Open any page, click the Boardmine icon in your toolbar, then <strong>Capture a zone</strong> and draw a
+          rectangle. It will be captured periodically and live-rendered here.
         </p>
         <button id="empty-cta" type="button" class="btn btn-accent">Open settings</button>
       </section>

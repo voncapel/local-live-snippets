@@ -1,2 +1,4 @@
 .DS_Store
 *.zip
+# Logo source files, not shipped with the extension
+brand-src/

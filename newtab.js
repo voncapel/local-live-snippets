@@ -6,16 +6,23 @@
 
 import { deleteImage, getAllImages, getImage } from "./db.js";
 import {
+  BOARD_NAME_MAX,
   LAYOUT_DEFAULT_WIDTH,
   LAYOUT_GAP,
   LAYOUT_MAX_WIDTH,
   LAYOUT_MIN_WIDTH,
   aspectOf,
   boxOf,
+  createBoard,
+  deleteBoard,
   deleteSnippet,
   findFreeSpot,
+  getBoards,
   getMeta,
-  getSnippets,
+  getSnippetsForBoard,
+  renameBoard,
+  resolveNewTabBoardId,
+  setSettings,
   upsertSnippet,
 } from "./storage.js";
 
@@ -23,19 +30,31 @@ const board = document.getElementById("board");
 const guideX = document.getElementById("guide-x");
 const guideY = document.getElementById("guide-y");
 const emptyBox = document.getElementById("empty");
+const emptyTitle = document.getElementById("empty-title");
 const clockEl = document.getElementById("clock");
 const runStatusEl = document.getElementById("run-status");
+const boardBtn = document.getElementById("board-btn");
+const boardBtnName = document.getElementById("board-btn-name");
+const boardPicker = boardBtn.parentElement;
 
 /** id -> { card, img, pill, pillDot, pillHost, foot, name, age, refreshBtn, menuBtn,
  *          handle, objectUrl, snippet, metaEntry, image, aspect } */
 const cards = new Map();
 let snippets = [];
 let meta = {};
+/** Board affiché par cette page (jamais vide après resolveBoard()). */
+let currentBoardId = null;
+/** Liste des boards, tenue à jour par storage.onChanged. */
+let boards = [];
+/** Id du board désigné New Tab (settings.newTabBoardId, résolu). */
+let newTabBoardId = null;
 /** Drag/resize en cours : le re-rendu sur storage.onChanged est mis en attente. */
 let interacting = null;
 let pendingReload = false;
 /** Menu « ⋯ » ouvert, s'il y en a un. */
 let openMenu = null;
+/** Menu du sélecteur de board ouvert, s'il y en a un. */
+let openBoardMenu = null;
 
 const SNAP_PX = 8;
 const MOVE_THRESHOLD = 4;
@@ -70,6 +89,14 @@ function hostOf(url) {
   } catch (_) {
     return url;
   }
+}
+
+/** Favicon du site via le cache de Chrome (permission "favicon", aucun réseau). */
+function faviconOf(url) {
+  const api = new URL(chrome.runtime.getURL("/_favicon/"));
+  api.searchParams.set("pageUrl", url);
+  api.searchParams.set("size", "32");
+  return api.toString();
 }
 
 function el(tag, className, text) {
@@ -296,6 +323,11 @@ function renderCard(entry) {
   entry.card.dataset.tone = tone;
   entry.pillHost.textContent = hostOf(snippet.url);
   entry.pill.title = snippet.url;
+  const iconSrc = faviconOf(snippet.url);
+  if (entry.pillIcon.getAttribute("src") !== iconSrc) {
+    entry.pill.classList.remove("no-icon");
+    entry.pillIcon.src = iconSrc;
+  }
   entry.name.textContent = snippet.name;
   entry.age.textContent = relativeTime(capturedAt);
 
@@ -437,6 +469,247 @@ document.addEventListener("keydown", (event) => {
   if (event.key === "Escape") closeMenu();
 });
 
+/* ----------------------------- sélecteur de board ----------------------------- */
+
+function currentBoard() {
+  return boards.find((b) => b.id === currentBoardId) || null;
+}
+
+function currentBoardName() {
+  const b = currentBoard();
+  return b ? b.name : "Board";
+}
+
+/** Titre de l'onglet, libellé du bouton et texte de l'état vide. */
+function applyBoardChrome() {
+  const name = currentBoardName();
+  document.title = `${name} — Boardmine`;
+  boardBtnName.textContent = name;
+  boardBtn.title = name;
+  emptyTitle.textContent = `Nothing on “${name}” yet`;
+}
+
+/** Met l'URL en phase avec le board affiché, sans recharger la page. */
+function syncUrl() {
+  const url = new URL(location.href);
+  if (url.searchParams.get("board") === currentBoardId) return;
+  url.searchParams.set("board", currentBoardId);
+  history.replaceState(null, "", url);
+}
+
+function closeBoardMenu() {
+  if (!openBoardMenu) return;
+  openBoardMenu.remove();
+  openBoardMenu = null;
+  boardBtn.setAttribute("aria-expanded", "false");
+}
+
+/** Bascule in-place sur un autre board (ne touche pas à newTabBoardId). */
+async function switchBoard(boardId) {
+  if (!boardId) return;
+  currentBoardId = boardId;
+  syncUrl();
+  applyBoardChrome();
+  renderBoardMenu();
+  await load();
+}
+
+// Indicateur « affiché sur le Nouvel Onglet » : cercle vide, ou plein avec un
+// point central pour le board actif (sémantique radio, un seul à la fois).
+const PIN_SVG =
+  '<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><circle class="pin-ring" cx="8" cy="8" r="6" fill="none" stroke="currentColor" stroke-width="1.5"/><circle class="pin-dot" cx="8" cy="8" r="3" fill="currentColor"/></svg>';
+
+// keepOpen : l'action remplace le contenu du menu au lieu de le fermer.
+function boardMenuButton(label, onClick, className, keepOpen) {
+  const btn = el("button", className, label);
+  btn.type = "button";
+  btn.addEventListener("click", (event) => {
+    event.stopPropagation();
+    if (!keepOpen) closeBoardMenu();
+    Promise.resolve(onClick()).catch((error) => console.warn("[LLS] board menu", error));
+  });
+  return btn;
+}
+
+/** Ligne « board » : nom (bascule) + épingle « New Tab ». */
+function boardRow(entryBoard) {
+  const row = el("div", "board-row");
+  row.dataset.current = String(entryBoard.id === currentBoardId);
+
+  const nameBtn = el("button", "board-row-name", entryBoard.name);
+  nameBtn.type = "button";
+  nameBtn.title = entryBoard.name;
+  nameBtn.addEventListener("click", (event) => {
+    event.stopPropagation();
+    closeBoardMenu();
+    switchBoard(entryBoard.id).catch((error) => console.warn("[LLS] switchBoard", error));
+  });
+
+  const pin = el("button", "board-row-pin", "");
+  pin.type = "button";
+  pin.innerHTML = PIN_SVG;
+  const pinned = entryBoard.id === newTabBoardId;
+  pin.setAttribute("aria-pressed", String(pinned));
+  pin.title = pinned ? "Shown on New Tab" : "Show this board on New Tab";
+  pin.addEventListener("click", async (event) => {
+    event.stopPropagation();
+    try {
+      await setSettings({ newTabBoardId: entryBoard.id });
+      newTabBoardId = entryBoard.id;
+      renderBoardMenu();
+    } catch (error) {
+      console.warn("[LLS] newTabBoardId", error);
+    }
+  });
+
+  row.append(nameBtn);
+  if (pinned) row.append(el("span", "board-row-tag", "New Tab"));
+  row.append(pin);
+  return row;
+}
+
+/** Saisie inline du nom d'un nouveau board, en place dans le menu. */
+function showNewBoardInput(menu) {
+  const input = el("input", "board-name-input");
+  input.type = "text";
+  input.placeholder = "Board name";
+  input.maxLength = BOARD_NAME_MAX;
+  input.addEventListener("pointerdown", (event) => event.stopPropagation());
+  input.addEventListener("click", (event) => event.stopPropagation());
+  input.addEventListener("keydown", async (event) => {
+    event.stopPropagation();
+    if (event.key === "Escape") {
+      renderBoardMenu();
+      return;
+    }
+    if (event.key !== "Enter") return;
+    const name = input.value.trim();
+    if (!name) return;
+    closeBoardMenu();
+    try {
+      const created = await createBoard(name);
+      boards = await getBoards();
+      await switchBoard(created.id);
+    } catch (error) {
+      window.alert(`Could not create the board: ${error && error.message ? error.message : error}`);
+    }
+  });
+
+  menu.replaceChildren(input);
+  input.focus();
+}
+
+async function renameCurrentBoard() {
+  const name = window.prompt("Board name", currentBoardName());
+  if (name === null) return;
+  const clean = name.trim();
+  if (!clean) return;
+  try {
+    await renameBoard(currentBoardId, clean);
+    boards = await getBoards();
+    applyBoardChrome();
+    renderBoardMenu();
+  } catch (error) {
+    window.alert(`Could not rename the board: ${error && error.message ? error.message : error}`);
+  }
+}
+
+async function deleteCurrentBoard() {
+  if (boards.length <= 1) return;
+  const name = currentBoardName();
+  const count = snippets.length;
+  const detail =
+    count === 0
+      ? "It has no snippet."
+      : count === 1
+        ? "1 snippet and its captured image will be erased."
+        : `${count} snippets and their captured images will be erased.`;
+  if (!window.confirm(`Delete “${name}”? ${detail}`)) return;
+
+  try {
+    const { deletedSnippetIds } = await deleteBoard(currentBoardId);
+    // La page qui supprime purge IndexedDB (comme pour deleteSnippet).
+    for (const id of deletedSnippetIds) {
+      await deleteImage(id).catch((error) => console.warn("[LLS] deleteImage", error));
+    }
+    boards = await getBoards();
+    newTabBoardId = await resolveNewTabBoardId();
+    await switchBoard(newTabBoardId);
+  } catch (error) {
+    window.alert(`Could not delete the board: ${error && error.message ? error.message : error}`);
+  }
+}
+
+/** (Re)construit le menu déroulant s'il est ouvert. */
+function renderBoardMenu() {
+  applyBoardChrome();
+  if (!openBoardMenu) return;
+  const menu = openBoardMenu;
+  menu.replaceChildren();
+
+  for (const b of boards) menu.appendChild(boardRow(b));
+  menu.appendChild(el("div", "board-menu-sep"));
+  menu.appendChild(boardMenuButton("New board…", () => showNewBoardInput(menu), null, true));
+  menu.appendChild(boardMenuButton("Rename", () => renameCurrentBoard()));
+
+  const del = boardMenuButton("Delete", () => deleteCurrentBoard(), "danger");
+  if (boards.length <= 1) {
+    del.disabled = true;
+    del.title = "The last board cannot be deleted.";
+  }
+  menu.appendChild(del);
+}
+
+function openBoardPicker() {
+  closeMenu();
+  closeBoardMenu();
+  const menu = el("div", "board-menu");
+  menu.addEventListener("pointerdown", (event) => event.stopPropagation());
+  boardPicker.appendChild(menu);
+  openBoardMenu = menu;
+  boardBtn.setAttribute("aria-expanded", "true");
+  renderBoardMenu();
+}
+
+boardBtn.addEventListener("click", (event) => {
+  event.stopPropagation();
+  if (openBoardMenu) closeBoardMenu();
+  else openBoardPicker();
+});
+
+document.addEventListener("click", (event) => {
+  if (!openBoardMenu) return;
+  if (openBoardMenu.contains(event.target)) return;
+  if (event.target.closest && event.target.closest("#board-btn")) return;
+  closeBoardMenu();
+});
+
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") closeBoardMenu();
+});
+
+/**
+ * Board affiché : ?board=<id> valide, sinon le board du Nouvel Onglet.
+ * Un ?board= inconnu est ignoré et retiré de l'URL.
+ */
+async function resolveBoard() {
+  boards = await getBoards();
+  newTabBoardId = await resolveNewTabBoardId();
+
+  const url = new URL(location.href);
+  const wanted = url.searchParams.get("board");
+  if (wanted && boards.some((b) => b.id === wanted)) {
+    currentBoardId = wanted;
+  } else {
+    currentBoardId = newTabBoardId;
+    if (wanted !== null) {
+      url.searchParams.delete("board");
+      history.replaceState(null, "", url);
+    }
+  }
+  applyBoardChrome();
+}
+
 /* --------------------------- drag et resize --------------------------- */
 
 function beginInteraction(entry, kind, event) {
@@ -555,8 +828,15 @@ function createCard(snippet) {
 
   const pill = el("span", "pill");
   const pillDot = el("span", "pill-dot");
+  const pillIcon = el("img", "pill-icon");
+  pillIcon.alt = "";
+  pillIcon.width = 16;
+  pillIcon.height = 16;
+  pillIcon.decoding = "async";
+  // Favicon indisponible (site hors cache Chrome) : on garde le domaine seul.
+  pillIcon.addEventListener("error", () => pill.classList.add("no-icon"));
   const pillHost = el("span", "pill-host");
-  pill.append(pillDot, pillHost);
+  pill.append(pillDot, pillIcon, pillHost);
 
   const tools = el("div", "tools");
   const refreshBtn = el("button", "tool", "");
@@ -586,6 +866,7 @@ function createCard(snippet) {
     overlay,
     pill,
     pillDot,
+    pillIcon,
     pillHost,
     foot,
     name,
@@ -722,7 +1003,7 @@ function updateRunStatus() {
 
 async function load() {
   const [loadedSnippets, loadedMeta, images] = await Promise.all([
-    getSnippets(),
+    getSnippetsForBoard(currentBoardId),
     getMeta(),
     getAllImages().catch((error) => {
       console.warn("[LLS] IndexedDB", error);
@@ -740,7 +1021,8 @@ document.getElementById("refresh-all").addEventListener("click", async (event) =
   const btn = event.currentTarget;
   btn.disabled = true;
   try {
-    await chrome.runtime.sendMessage({ type: "captureAll" });
+    // Scopé au board affiché : le rafraîchissement périodique reste global.
+    await chrome.runtime.sendMessage({ type: "captureAll", boardId: currentBoardId });
   } catch (error) {
     console.warn("[LLS] captureAll", error);
   } finally {
@@ -758,8 +1040,34 @@ document.getElementById("empty-cta").addEventListener("click", () => {
   chrome.runtime.openOptionsPage();
 });
 
+/** Un board a changé ailleurs : re-rendre le sélecteur, basculer si besoin. */
+async function onBoardsChanged() {
+  boards = await getBoards();
+  newTabBoardId = await resolveNewTabBoardId();
+  if (!boards.some((b) => b.id === currentBoardId)) {
+    // Board supprimé depuis un autre onglet : bascule sur celui du Nouvel Onglet.
+    await switchBoard(newTabBoardId);
+    return;
+  }
+  renderBoardMenu();
+}
+
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area !== "local") return;
+
+  if (changes.boards) {
+    onBoardsChanged().catch((error) => console.warn("[LLS] boards changed", error));
+  }
+
+  if (changes.settings) {
+    // L'épingle « New Tab » du menu suit le réglage, quel que soit l'onglet.
+    resolveNewTabBoardId()
+      .then((id) => {
+        newTabBoardId = id;
+        renderBoardMenu();
+      })
+      .catch((error) => console.warn("[LLS] newTabBoardId", error));
+  }
 
   if (changes.snippets || changes.settings) {
     // Un re-rendu couperait le glisser en cours : on le repousse.
@@ -794,6 +1102,7 @@ setInterval(updateAges, 30000);
 setInterval(updateClock, 30000);
 updateClock();
 
+await resolveBoard();
 await load();
 
 // Après le premier rendu seulement : le SW peut enfiler ce qui est périmé.

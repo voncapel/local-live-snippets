@@ -1,17 +1,24 @@
 :root {
-  --bg: #0b0c11;
-  --bg-2: #14151d;
+  --bg: #0b0919;
+  --bg-2: #14102c;
   --text: #f2f3f7;
-  --muted: #8b8fa3;
+  --muted: #8c8fa6;
   --glass: rgba(255, 255, 255, 0.045);
-  --glass-strong: rgba(22, 23, 32, 0.78);
+  --glass-strong: rgba(22, 19, 44, 0.82);
   --line: rgba(255, 255, 255, 0.08);
   --line-strong: rgba(255, 255, 255, 0.16);
-  --lime: #b6ff5c;
+  --citrus: #aeef3e;
+  --citrus-hover: #bcff4d;
+  --citrus-glow: rgba(174, 239, 62, 0.45);
+  --blue: #73b6fa;
+  --blue-hover: #8fc5fc;
+  --navy-deep: #181140;
+  --frame-light: #e8e7f1;
+  --lime: var(--citrus);
   --yellow: #f6ff6a;
   --lavender: #c9b8ff;
   --bad: #ff5c7a;
-  --shadow: 0 1px 0 rgba(255, 255, 255, 0.04) inset, 0 10px 30px rgba(0, 0, 0, 0.45);
+  --shadow: 0 1px 0 rgba(255, 255, 255, 0.04) inset, 0 10px 30px rgba(8, 6, 20, 0.55);
 }
 
 * {
@@ -22,9 +29,9 @@ body {
   margin: 0;
   min-height: 100vh;
   background:
-    radial-gradient(1200px 600px at 10% -10%, rgba(120, 90, 255, 0.16), transparent 60%),
-    radial-gradient(1000px 520px at 92% -8%, rgba(182, 255, 92, 0.12), transparent 60%),
-    var(--bg);
+    radial-gradient(1200px 600px at 10% -10%, rgba(115, 182, 250, 0.16), transparent 60%),
+    radial-gradient(1000px 520px at 92% -8%, rgba(174, 239, 62, 0.12), transparent 60%),
+    linear-gradient(180deg, #110d29 0%, var(--bg) 100%);
   background-attachment: fixed;
   color: var(--text);
   font: 14px/1.55 -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto, sans-serif;
@@ -37,11 +44,39 @@ body {
   padding: 44px 24px 72px;
 }
 
-header h1 {
-  margin: 0 0 8px;
-  font-size: 26px;
-  font-weight: 600;
-  letter-spacing: -0.02em;
+.brand-header {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 8px;
+}
+
+.brand-picto {
+  display: block;
+  width: 26px;
+  height: 34px;
+  flex-shrink: 0;
+  filter: drop-shadow(0 0 12px rgba(115, 182, 250, 0.4));
+}
+
+.brand-wordmark {
+  display: block;
+  height: 26px;
+  width: auto;
+  opacity: 0.96;
+  filter: drop-shadow(0 1px 4px rgba(0, 0, 0, 0.5));
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border-width: 0;
 }
 
 .sub {
@@ -110,15 +145,17 @@ header h1 {
 }
 
 .btn-primary {
-  background: var(--lime);
-  border-color: var(--lime);
+  background: var(--citrus);
+  border-color: var(--citrus);
   color: #0c1206;
   font-weight: 600;
+  box-shadow: 0 0 16px rgba(174, 239, 62, 0.25);
 }
 
 .btn-primary:hover:not(:disabled) {
-  background: var(--lime);
-  filter: brightness(1.06);
+  background: var(--citrus-hover);
+  border-color: var(--citrus-hover);
+  box-shadow: 0 0 20px rgba(174, 239, 62, 0.4);
 }
 
 .btn-ghost {
@@ -195,8 +232,8 @@ header h1 {
 }
 
 .dot.fresh {
-  background: var(--lime);
-  box-shadow: 0 0 8px rgba(182, 255, 92, 0.7);
+  background: var(--citrus);
+  box-shadow: 0 0 8px rgba(174, 239, 62, 0.8);
 }
 .dot.aging {
   background: var(--yellow);
@@ -220,7 +257,8 @@ legend {
 
 input[type="text"],
 input[type="url"],
-input[type="number"] {
+input[type="number"],
+select {
   width: 100%;
   padding: 9px 12px;
   border: 1px solid var(--line);
@@ -239,15 +277,90 @@ input[readonly] {
   color: var(--muted);
 }
 
-input:focus {
+input:focus,
+select:focus {
   outline: none;
-  border-color: var(--line-strong);
-  box-shadow: 0 0 0 2px rgba(182, 255, 92, 0.35);
+  border-color: var(--blue);
+  box-shadow: 0 0 0 2px rgba(115, 182, 250, 0.35);
+}
+
+select:disabled {
+  color: var(--muted);
+  cursor: default;
+}
+
+/* Filtre de board au-dessus de la liste des snippets. */
+.list-filter {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.list-filter label {
+  font-size: 12.5px;
+  font-weight: 600;
+  flex: 0 0 auto;
+}
+
+.list-filter select {
+  width: auto;
+  min-width: 180px;
+}
+
+/* Badge du board sur chaque ligne de snippet. */
+.board-badge {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--lavender);
+  border: 1px solid var(--line);
+  background: rgba(201, 184, 255, 0.1);
+  border-radius: 999px;
+  padding: 1px 9px;
+  white-space: nowrap;
+}
+
+/* Panneau Boards. */
+.board-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.board-row {
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: rgba(0, 0, 0, 0.18);
+  padding: 13px 15px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.board-main {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.board-name {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.board-newtab {
+  margin-right: 4px;
+  white-space: nowrap;
+  color: var(--muted);
 }
 
 input[type="checkbox"],
 input[type="radio"] {
-  accent-color: var(--lime);
+  accent-color: var(--citrus);
 }
 
 fieldset {

@@ -1,9 +1,18 @@
-// Helpers de configuration : snippets, settings et métadonnées.
-// Tout vit dans chrome.storage.local sous les clés "snippets", "settings", "meta".
+// Helpers de configuration : boards, snippets, settings et métadonnées.
+// Tout vit dans chrome.storage.local sous les clés "boards", "snippets",
+// "settings", "meta" et "ui".
 
 export const KEY_SNIPPETS = "snippets";
 export const KEY_SETTINGS = "settings";
 export const KEY_META = "meta";
+export const KEY_BOARDS = "boards";
+export const KEY_UI = "ui";
+
+// Board par défaut : id déterministe pour que la migration paresseuse des
+// snippets sans boardId ne dépende d'aucun ordre d'exécution.
+export const DEFAULT_BOARD_ID = "default";
+export const DEFAULT_BOARD_NAME = "Main";
+export const BOARD_NAME_MAX = 40;
 
 // Disposition libre de la page Nouvel Onglet.
 // Les layouts sont stockés en pixels réels { x, y, w }.
@@ -23,9 +32,12 @@ export const DEFAULT_SETTINGS = {
   // Chrome. Désactivé par défaut (une fenêtre apparaît brièvement).
   captureWindow: false,
   imagesTimeoutMs: 6000,
+  // Board affiché par la page Nouvel Onglet (sans paramètre ?board=).
+  newTabBoardId: DEFAULT_BOARD_ID,
 };
 
 export const DEFAULT_SNIPPET = {
+  boardId: DEFAULT_BOARD_ID,
   name: "",
   url: "",
   enabled: true,
@@ -98,6 +110,9 @@ export function normalizeSnippet(raw) {
   const offset = s.offset || DEFAULT_SNIPPET.offset;
   return {
     id: s.id || crypto.randomUUID(),
+    // Migration paresseuse : pas de boardId (export v1/v2, snippet 0.3.x) -> "default".
+    // Synchrone : aucune vérification d'existence du board ici.
+    boardId: String(s.boardId || "").trim() || DEFAULT_BOARD_ID,
     name: String(s.name || "").trim() || String(s.url || "Untitled"),
     url: String(s.url || "").trim(),
     enabled: s.enabled !== false,
@@ -145,7 +160,17 @@ export async function getSettings() {
     imagesTimeoutMs: Math.round(
       num(raw.imagesTimeoutMs, DEFAULT_SETTINGS.imagesTimeoutMs, 0, 60000)
     ),
+    // Validation syntaxique seulement : l'existence du board est résolue par
+    // resolveNewTabBoardId() (getSettings reste sans lecture des boards).
+    newTabBoardId: String(raw.newTabBoardId || "").trim() || DEFAULT_BOARD_ID,
   };
+}
+
+/** Board du Nouvel Onglet, garanti existant : réglage sinon premier board. */
+export async function resolveNewTabBoardId() {
+  const [settings, boards] = await Promise.all([getSettings(), getBoards()]);
+  const found = boards.find((b) => b.id === settings.newTabBoardId);
+  return found ? found.id : boards[0].id;
 }
 
 export async function setSettings(patch) {
@@ -213,6 +238,117 @@ export async function deleteMetaFor(id) {
   if (!(id in meta)) return;
   delete meta[id];
   await chrome.storage.local.set({ [KEY_META]: meta });
+}
+
+/* -------------------------------- boards -------------------------------- */
+
+/** Normalise un board partiel : id, nom borné à 40 caractères, date de création. */
+function normalizeBoard(raw) {
+  const b = raw && typeof raw === "object" ? raw : {};
+  const name = String(b.name || "").trim().slice(0, BOARD_NAME_MAX);
+  return {
+    id: String(b.id || "").trim() || crypto.randomUUID(),
+    name: name || DEFAULT_BOARD_NAME,
+    createdAt: num(b.createdAt, Date.now(), 0, Number.MAX_SAFE_INTEGER),
+  };
+}
+
+/**
+ * Liste des boards, jamais vide : si le stockage est vide (première ouverture
+ * de 0.4.0), le board "default" est créé et persisté à la volée.
+ */
+export async function getBoards() {
+  const got = await chrome.storage.local.get(KEY_BOARDS);
+  const list = Array.isArray(got[KEY_BOARDS]) ? got[KEY_BOARDS] : [];
+  const boards = list.map(normalizeBoard);
+  if (boards.length) return boards;
+  const fallback = [
+    { id: DEFAULT_BOARD_ID, name: DEFAULT_BOARD_NAME, createdAt: Date.now() },
+  ];
+  await chrome.storage.local.set({ [KEY_BOARDS]: fallback });
+  return fallback;
+}
+
+export async function setBoards(list) {
+  const normalized = (Array.isArray(list) ? list : []).map(normalizeBoard);
+  await chrome.storage.local.set({ [KEY_BOARDS]: normalized });
+  // Passe par getBoards() pour conserver l'invariant « jamais vide ».
+  return getBoards();
+}
+
+export async function getBoard(id) {
+  const boards = await getBoards();
+  return boards.find((b) => b.id === id) || null;
+}
+
+export async function createBoard(name) {
+  const clean = String(name || "").trim().slice(0, BOARD_NAME_MAX);
+  if (!clean) throw new Error("Board name is required.");
+  const boards = await getBoards();
+  const board = { id: crypto.randomUUID(), name: clean, createdAt: Date.now() };
+  boards.push(board);
+  await chrome.storage.local.set({ [KEY_BOARDS]: boards });
+  return board;
+}
+
+export async function renameBoard(id, name) {
+  const clean = String(name || "").trim().slice(0, BOARD_NAME_MAX);
+  if (!clean) throw new Error("Board name is required.");
+  const boards = await getBoards();
+  const board = boards.find((b) => b.id === id);
+  if (!board) throw new Error("Unknown board.");
+  board.name = clean;
+  await chrome.storage.local.set({ [KEY_BOARDS]: boards });
+  return board;
+}
+
+/**
+ * Supprime un board, ses snippets et leurs meta. Le dernier board ne peut pas
+ * être supprimé. L'appelant purge les images IndexedDB des ids renvoyés.
+ */
+export async function deleteBoard(id) {
+  const boards = await getBoards();
+  if (boards.length <= 1) throw new Error("The last board cannot be deleted.");
+  const remaining = boards.filter((b) => b.id !== id);
+  if (remaining.length === boards.length) throw new Error("Unknown board.");
+
+  const snippets = await getSnippets();
+  const deletedSnippetIds = snippets.filter((s) => s.boardId === id).map((s) => s.id);
+  const meta = await getMeta();
+  for (const snippetId of deletedSnippetIds) delete meta[snippetId];
+
+  await chrome.storage.local.set({
+    [KEY_BOARDS]: remaining,
+    [KEY_SNIPPETS]: snippets.filter((s) => s.boardId !== id),
+    [KEY_META]: meta,
+  });
+
+  // Le board du Nouvel Onglet disparaît : bascule sur le premier restant.
+  const settings = await getSettings();
+  if (settings.newTabBoardId === id) {
+    await setSettings({ newTabBoardId: remaining[0].id });
+  }
+  return { deletedSnippetIds };
+}
+
+export async function getSnippetsForBoard(boardId) {
+  const list = await getSnippets();
+  return list.filter((s) => s.boardId === boardId);
+}
+
+/* ---------------------------- état d'interface --------------------------- */
+
+/** État d'interface non critique (ex. lastBoardId pour la présélection capture). */
+export async function getUi() {
+  const got = await chrome.storage.local.get(KEY_UI);
+  const ui = got[KEY_UI];
+  return ui && typeof ui === "object" ? ui : {};
+}
+
+export async function patchUi(patch) {
+  const next = { ...(await getUi()), ...(patch || {}) };
+  await chrome.storage.local.set({ [KEY_UI]: next });
+  return next;
 }
 
 /** true si le snippet n'a jamais été capturé ou si son image dépasse son intervalle. */

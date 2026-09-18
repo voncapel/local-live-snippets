@@ -6,12 +6,17 @@ import { captureSnippet, closeCaptureWindow, teardownCaptureTab } from "./captur
 import {
   LAYOUT_DEFAULT_WIDTH,
   findFreeSpot,
+  getBoard,
+  getBoards,
   getMeta,
   getSettings,
   getSnippet,
   getSnippets,
+  getSnippetsForBoard,
+  getUi,
   isStale,
   patchMeta,
+  resolveNewTabBoardId,
   upsertSnippet,
 } from "./storage.js";
 
@@ -131,7 +136,7 @@ async function drainQueue() {
     draining = false;
     // File vide : plus de raison de garder la fenêtre de capture ouverte.
     await closeIdleCaptureWindow().catch((error) =>
-      console.warn("[LLS] closeIdleCaptureWindow", error)
+      console.warn("[Boardmine] closeIdleCaptureWindow", error)
     );
   }
 }
@@ -191,14 +196,14 @@ async function boot() {
 }
 
 // Top-level : couvre le réveil du SW hors onStartup/onInstalled.
-boot().catch((error) => console.error("[LLS] boot", error));
+boot().catch((error) => console.error("[Boardmine] boot", error));
 
 chrome.runtime.onInstalled.addListener(() => {
-  boot().catch((error) => console.error("[LLS] onInstalled", error));
+  boot().catch((error) => console.error("[Boardmine] onInstalled", error));
 });
 
 chrome.runtime.onStartup.addListener(() => {
-  boot().catch((error) => console.error("[LLS] onStartup", error));
+  boot().catch((error) => console.error("[Boardmine] onStartup", error));
 });
 
 chrome.alarms.onAlarm.addListener((alarm) => {
@@ -206,7 +211,7 @@ chrome.alarms.onAlarm.addListener((alarm) => {
   (async () => {
     await recoverOrphansIfStuck();
     await enqueueStale();
-  })().catch((error) => console.error("[LLS] onAlarm", error));
+  })().catch((error) => console.error("[Boardmine] onAlarm", error));
 });
 
 /** Si une capture est marquée "en cours" depuis plus de 5 min, c'est un reste. */
@@ -222,7 +227,7 @@ async function recoverOrphansIfStuck() {
 // Le tick global a peut-être changé : réaligner l'alarme.
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area !== "local" || !changes.settings) return;
-  ensureAlarm().catch((error) => console.error("[LLS] ensureAlarm", error));
+  ensureAlarm().catch((error) => console.error("[Boardmine] ensureAlarm", error));
 });
 
 /* ------------------------------- picker ------------------------------- */
@@ -280,9 +285,9 @@ async function startPicker(url, snippetId) {
   return tab.id;
 }
 
-/** Place un nouveau snippet dans la première case libre du plateau. */
-async function initialLayout(rect) {
-  const snippets = await getSnippets();
+/** Place un nouveau snippet dans la première case libre du plateau cible. */
+async function initialLayout(rect, boardId) {
+  const snippets = await getSnippetsForBoard(boardId);
   const taken = snippets.map((s) => s.layout).filter(Boolean);
   const ratio = rect && rect.width ? rect.height / rect.width : 0.75;
   const w = rect && rect.width
@@ -290,6 +295,19 @@ async function initialLayout(rect) {
     : LAYOUT_DEFAULT_WIDTH;
   const h = Math.round(w * ratio);
   return findFreeSpot(w, h, taken);
+}
+
+/**
+ * Board de destination d'une nouvelle capture : board explicite du message,
+ * sinon `ui.lastBoardId` s'il existe encore, sinon le board du Nouvel Onglet.
+ */
+async function resolveCaptureBoardId(message) {
+  const wanted = String((message && message.boardId) || "").trim();
+  if (wanted && (await getBoard(wanted))) return wanted;
+  const ui = await getUi();
+  const last = String(ui.lastBoardId || "").trim();
+  if (last && (await getBoard(last))) return last;
+  return resolveNewTabBoardId();
 }
 
 /** Crée (ou met à jour) un snippet depuis le résultat du picker. */
@@ -306,6 +324,8 @@ async function handlePickerResult(message, sender) {
   const viewport = message.viewport || {};
   const existing = message.snippetId ? await getSnippet(message.snippetId) : null;
   const title = String(message.title || message.url || "Sans titre").slice(0, 60);
+  // En édition, le snippet garde son board (pas de déplacement en v1).
+  const boardId = existing ? existing.boardId : await resolveCaptureBoardId(message);
 
   const snippet = existing
     ? {
@@ -319,6 +339,7 @@ async function handlePickerResult(message, sender) {
         viewportHeight: Math.round(viewport.height || 0),
       }
     : {
+        boardId,
         name: title,
         url: message.url || "",
         mode: "anchor",
@@ -327,16 +348,20 @@ async function handlePickerResult(message, sender) {
         rect: message.rect,
         viewportWidth: Math.round(viewport.width || 0),
         viewportHeight: Math.round(viewport.height || 0),
-        layout: await initialLayout(message.rect),
+        layout: await initialLayout(message.rect, boardId),
       };
 
   const saved = await upsertSnippet(snippet);
   await enqueue([saved.id]);
 
-  // À la création seulement : montrer immédiatement la carte qui apparaît.
-  if (!existing) chrome.tabs.create({ url: "chrome://newtab" }).catch(() => {});
+  // À la création seulement : ouvrir la page du board cible (et non le Nouvel
+  // Onglet) pour que la carte soit visible même sur un autre board.
+  if (!existing) {
+    const url = `${chrome.runtime.getURL("newtab.html")}?board=${encodeURIComponent(saved.boardId)}`;
+    chrome.tabs.create({ url }).catch(() => {});
+  }
 
-  return { ok: true, snippetId: saved.id, created: !existing };
+  return { ok: true, snippetId: saved.id, created: !existing, boardId: saved.boardId };
 }
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
@@ -351,7 +376,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         return { ok: true, ...res };
       }
       case "captureAll": {
-        const snippets = await getSnippets();
+        // `boardId` présent : « Refresh all » d'un plateau ; absent : tous les boards.
+        const snippets = message.boardId
+          ? await getSnippetsForBoard(message.boardId)
+          : await getSnippets();
         const res = await enqueue(snippets.filter((s) => s.enabled && s.url).map((s) => s.id));
         return { ok: true, ...res };
       }
@@ -365,11 +393,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         return { ok: true, ...res };
       }
       case "getState": {
-        const [state, snippets, meta, settings] = await Promise.all([
+        const [state, snippets, meta, settings, boards] = await Promise.all([
           getRunState(),
           getSnippets(),
           getMeta(),
           getSettings(),
+          getBoards(),
         ]);
         return {
           ok: true,
@@ -378,6 +407,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           snippets,
           meta,
           settings,
+          boards,
         };
       }
       case "pickerResult":
